@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import type { Logger } from "../omp/api";
+import { deferred } from "../shared/deferred";
+import { errorMessage } from "../shared/errors";
 
 const WORKSPACE_FILE_LIMIT = 5000;
 const WORKSPACE_EXCLUDE = "**/{node_modules,.git}/**";
@@ -31,8 +34,8 @@ function openEditorUris(): vscode.Uri[] {
 }
 
 /** Multi-select picker over open editors and workspace files; resolves to the chosen files (empty when dismissed). */
-export function pickContextFiles(): Promise<vscode.Uri[]> {
-	const { promise, resolve } = Promise.withResolvers<vscode.Uri[]>();
+export function pickContextFiles(logger: Logger): Promise<vscode.Uri[]> {
+	const { promise, resolve } = deferred<vscode.Uri[]>();
 	const picker = vscode.window.createQuickPick<FileItem>();
 	picker.title = "Add files to the OMP chat";
 	picker.placeholder = "Search files; select several with Space, confirm with Enter";
@@ -54,7 +57,11 @@ export function pickContextFiles(): Promise<vscode.Uri[]> {
 			picker.selectedItems = picker.items.filter(item => selected.some(chosen => chosen.uri?.toString() === item.uri?.toString()));
 			picker.busy = false;
 		},
-		() => (picker.busy = false),
+		error => {
+			logger.warn("Workspace file search failed", error);
+			picker.title = `Add files to the OMP chat (workspace search failed: ${errorMessage(error)})`;
+			picker.busy = false;
+		},
 	);
 	picker.onDidAccept(() => {
 		const chosen = picker.selectedItems.length > 0 ? picker.selectedItems : picker.activeItems;

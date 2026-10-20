@@ -1,3 +1,4 @@
+import { deferred } from "../shared/deferred";
 import type { PromptOutcome, SessionPhase } from "./api";
 import type { PromptResultFrame } from "./protocol";
 
@@ -25,7 +26,7 @@ export class PromptTracker {
 	}
 
 	submit(id: string): Promise<PromptOutcome> {
-		const { promise, resolve } = Promise.withResolvers<PromptOutcome>();
+		const { promise, resolve } = deferred<PromptOutcome>();
 		this.#tickets.set(id, { admitted: false, resolve });
 		this.#update();
 		return promise;
@@ -85,8 +86,9 @@ export class PromptTracker {
 		this.#update();
 	}
 
+	/** Marks the running turn as aborting; idle and yielded sessions have no turn to abort. */
 	abortRequested(): void {
-		if (this.#phase === "idle") return;
+		if (this.#tickets.size === 0 && !this.#runActive) return;
 		this.#aborting = true;
 		this.#update();
 	}

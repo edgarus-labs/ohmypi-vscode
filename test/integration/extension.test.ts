@@ -2,27 +2,14 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { OmpExtensionApi } from "../../src/extension";
 import type { InteractionRequest, OmpServiceApi, SessionView } from "../../src/omp/api";
-import type { Attachment } from "../../src/webview/protocol";
+import { deferred } from "../../src/shared/deferred";
+import { supportsSecondarySidebar } from "../../src/ui/layout";
+import type { RenderedReport } from "../../src/webview/protocol";
 
-interface RenderedSnapshot {
-	counts: Record<string, number>;
-	lastAssistantText?: string;
-	interactions: string[];
-	collapsedTools?: number;
-	attachments?: string[];
-}
-
-interface TestApi {
-	service: OmpServiceApi;
-	chat: {
-		readonly visible: boolean;
-		lastRendered?: RenderedSnapshot;
-		onDidRender: vscode.Event<RenderedSnapshot>;
-		send(text: string, mode: "auto", includeContext: boolean, attachments: Attachment[]): Promise<{ status: string }>;
-	};
-	changes: { readonly changes?: ReadonlyArray<{ path: string }> };
-}
+/** The suite starts only once OMP is ready, so the service is always present. */
+type ReadyApi = OmpExtensionApi & { readonly service: OmpServiceApi };
 
 function webviewTabs(): vscode.Tab[] {
 	return vscode.window.tabGroups.all.flatMap(group => group.tabs.filter(tab => tab.input instanceof vscode.TabInputWebview));
@@ -55,7 +42,7 @@ async function until<T>(what: string, probe: () => T | undefined | null | false 
 }
 
 function nextInteraction(service: OmpServiceApi): Promise<InteractionRequest> {
-	const { promise, resolve } = Promise.withResolvers<InteractionRequest>();
+	const { promise, resolve } = deferred<InteractionRequest>();
 	const sub = service.onInteractionRequest(request => {
 		sub.dispose();
 		resolve(request);
@@ -64,17 +51,18 @@ function nextInteraction(service: OmpServiceApi): Promise<InteractionRequest> {
 }
 
 describe("oh-my-pi extension (fake OMP)", () => {
-	let api: TestApi;
+	let api: ReadyApi;
 
 	before(async () => {
-		const ext = vscode.extensions.getExtension<TestApi>("oh-my-pi.oh-my-pi");
+		const ext = vscode.extensions.getExtension<OmpExtensionApi>("oh-my-pi.oh-my-pi");
 		assert.ok(ext, "extension is installed in the dev host");
-		api = await ext.activate();
+		const activated = await ext.activate();
 		await vscode.commands.executeCommand("omp.openConversation");
-		await until("connection ready", () => api.service.connection.state === "ready");
+		await until("connection ready", () => activated.service?.connection.state === "ready");
+		api = activated as ReadyApi;
 	});
 
-	it("shows the conversation as a webview view in the Secondary Sidebar, not as an editor tab", async () => {
+	it("shows the conversation as a webview view, not as an editor tab", async () => {
 		const contributes = vscode.extensions.getExtension("oh-my-pi.oh-my-pi")!.packageJSON.contributes;
 		const [container] = contributes.viewsContainers.secondarySidebar as Array<{ id: string }>;
 		assert.deepEqual(
@@ -90,9 +78,10 @@ describe("oh-my-pi extension (fake OMP)", () => {
 	});
 
 	it("omp.sendPrompt reveals a hidden chat view and renders it", async () => {
-		await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+		const sideBar = supportsSecondarySidebar(vscode.version) ? "workbench.action.closeAuxiliaryBar" : "workbench.action.closeSidebar";
+		await vscode.commands.executeCommand(sideBar);
 		await until("chat hidden", () => !api.chat.visible);
-		const { promise: rendered, resolve } = Promise.withResolvers<RenderedSnapshot>();
+		const { promise: rendered, resolve } = deferred<RenderedReport>();
 		const sub = api.chat.onDidRender(report => {
 			sub.dispose();
 			resolve(report);
@@ -118,7 +107,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 			{ id: "b", kind: "file", path: other.fsPath, label: "settings.json" },
 		]);
 		assert.equal(outcome.status, "completed");
-		assert.ok(sentCommands().some(c => c.type === "prompt" && c.message === "compare these\n\nAttached: @sample.txt @.vscode/settings.json"));
+		assert.ok(sentCommands().some(c => c.type === "prompt" && c.message === `compare these\n\nAttached: @sample.txt @${path.join(".vscode", "settings.json")}`));
 	});
 
 	it("toggles fast mode through OMP", async () => {
@@ -136,7 +125,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		assert.ok(sentCommands().some(c => c.type === "set_session_name" && c.name === "Refactor parser"));
 	});
 
-	it("1-4: activates, spawns OMP, completes the RPC handshake and creates a session", async () => {
+	it("activates, spawns OMP, completes the RPC handshake and creates a session", async () => {
 		const status = api.service.connection;
 		assert.equal(status.state, "ready");
 		assert.ok(status.pid && status.pid > 0);
@@ -155,7 +144,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		assert.ok(sentCommands().some(c => c.type === "set_model" && c.modelId === target.id));
 	});
 
-	it("5-8,12-13: streams assistant output, renders it and settles only at session_settled", async () => {
+	it("streams assistant output and renders the new reply", async () => {
 		const phases: SessionView["phase"][] = [];
 		const sub = api.service.onDidChangeSession(s => phases.push(s.phase));
 		const outcome = await api.service.prompt("hello there");
@@ -165,12 +154,52 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("idle", () => api.service.session.phase === "idle");
 		const assistant = api.service.transcript.filter(i => i.kind === "assistant");
 		assert.ok(assistant.length > 0 && assistant.at(-1)!.kind === "assistant");
-		const rendered = await until("webview render", () => api.chat.lastRendered?.lastAssistantText && api.chat.lastRendered);
+		const rendered = await until("webview render", () => api.chat.lastRendered?.lastAssistantText?.includes("Echo: hello there") && api.chat.lastRendered);
 		assert.ok((rendered.counts.assistant ?? 0) >= 1);
 		assert.ok((rendered.counts.user ?? 0) >= 1);
 	});
 
-	it("8: renders tool events and tracks the changed file for native diff", async () => {
+	it("lets OMP edit and read an open editor buffer through the vscode_ host tools", async () => {
+		const registered = sentCommands().find(c => c.type === "set_host_tools");
+		const names = ((registered?.tools ?? []) as Array<{ name: string }>).map(tool => tool.name);
+		assert.ok(names.includes("vscode_replace_lines") && names.includes("vscode_read_document"), `registered: ${names.join(", ")}`);
+		const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(workspace, "sample.txt")));
+		await vscode.window.showTextDocument(document);
+		const original = document.getText();
+		try {
+			await api.service.prompt('hosttool vscode_replace_lines {"path":"sample.txt","startLine":1,"endLine":0,"text":"first line from OMP"}');
+			assert.equal(document.lineAt(0).text, "first line from OMP");
+			assert.ok(document.isDirty, "the edit stays unsaved in the buffer");
+			await api.service.prompt('hosttool vscode_read_document {"path":"sample.txt","startLine":1,"endLine":1}');
+			const reply = api.service.transcript.filter(item => item.kind === "assistant").at(-1);
+			assert.ok(reply?.kind === "assistant" && /^Host tool ok: [\s\S]*1[^\n]*first line from OMP/.test(reply.text), JSON.stringify(reply));
+			await api.service.prompt('hosttool vscode_read_document {"path":"../outside.txt"}');
+			const refused = api.service.transcript.filter(item => item.kind === "assistant").at(-1);
+			assert.ok(refused?.kind === "assistant" && refused.text.startsWith("Host tool error:"), JSON.stringify(refused));
+		} finally {
+			await vscode.window.showTextDocument(document);
+			await vscode.commands.executeCommand("workbench.action.files.revert");
+			assert.equal(document.getText(), original);
+		}
+	});
+
+	it("stays busy after the prompt result until OMP reports the session settled", async () => {
+		let running = false;
+		let finishedWhenIdle: boolean | undefined;
+		const sub = api.service.onDidChangeSession(s => {
+			if (s.phase !== "idle") running = true;
+			else if (running && finishedWhenIdle === undefined) {
+				finishedWhenIdle = api.service.transcript.some(i => i.kind === "assistant" && i.text.includes("Background job finished."));
+			}
+		});
+		const outcome = await api.service.prompt("background job");
+		assert.equal(outcome.sessionSettled, false);
+		await until("idle after settling", () => finishedWhenIdle !== undefined);
+		sub.dispose();
+		assert.equal(finishedWhenIdle, true, "idle only after the background turn finished");
+	});
+
+	it("renders tool events and tracks the changed file for native diff", async () => {
 		const file = path.join(workspace, "sample.txt");
 		await api.service.prompt(`tool ${file}`);
 		await until("tool items", () => api.service.transcript.filter(i => i.kind === "tool").length >= 2);
@@ -190,7 +219,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("tracked racy change", () => api.changes.changes?.some(c => c.path === file), 3000);
 		await vscode.commands.executeCommand("omp.changes.openDiff", vscode.Uri.file(file));
 		const diff = await until("racy diff", () =>
-			vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputTextDiff && t.input.modified.fsPath === file),
+			vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputTextDiff && t.input.modified.fsPath === vscode.Uri.file(file).fsPath),
 		);
 		const original = await vscode.workspace.openTextDocument((diff.input as vscode.TabInputTextDiff).original);
 		assert.equal(original.getText(), "original\n", "the diff baseline is the content before OMP's edit");
@@ -200,6 +229,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		const file = path.join(workspace, "sample.txt");
 		const baselineDiffs = () =>
 			vscode.window.tabGroups.all.flatMap(g => g.tabs).filter(t => t.input instanceof vscode.TabInputTextDiff && t.input.original.scheme === "omp-base");
+		await api.service.prompt(`tool ${file}`);
 		await until("tracked change", () => api.changes.changes?.some(c => c.path === file));
 		await vscode.commands.executeCommand("omp.changes.openDiff", vscode.Uri.file(file));
 		await until("baseline diff open", () => baselineDiffs().length > 0);
@@ -208,14 +238,14 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("stale diffs closed", () => baselineDiffs().length === 0, 3000);
 	});
 
-	it("9: renders subagent events in the agent hub", async () => {
+	it("renders subagent events in the agent hub", async () => {
 		await api.service.prompt("subagent please");
 		const agents = await until("subagents", () => api.service.agents.length >= 3 && api.service.agents);
 		assert.ok(agents.some(a => a.id === "main"));
 		assert.ok(agents.filter(a => a.id !== "main").every(a => a.status === "completed"));
 	});
 
-	it("10-11: displays an approval request and delivers the response to OMP", async () => {
+	it("displays an approval request and delivers the response to OMP", async () => {
 		const pending = nextInteraction(api.service);
 		const done = api.service.prompt("approve this");
 		const request = await pending;
@@ -226,7 +256,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		assert.ok(sentCommands().some(c => c.type === "extension_ui_response" && c.id === request.id && c.confirmed === true));
 	});
 
-	it("14: cancellation aborts a running turn", async () => {
+	it("aborts a running turn on cancellation", async () => {
 		const done = api.service.prompt("slow stream");
 		await until("running", () => api.service.session.phase === "running");
 		await vscode.commands.executeCommand("omp.abort");
@@ -235,7 +265,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("idle after abort", () => api.service.session.phase === "idle");
 	});
 
-	it("15-16: survives an OMP crash, restarts and keeps the session", async () => {
+	it("survives an OMP crash, restarts and keeps the session", async () => {
 		const before = api.service.connection.pid;
 		const file = api.service.session.sessionFile;
 		const outcome = await api.service.prompt("crash now");
@@ -254,6 +284,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 	});
 
 	it("resumes a stored session", async () => {
+		await api.service.prompt("remember this session");
 		const first = api.service.session.sessionFile!;
 		await api.service.newSession();
 		await until("new file", () => api.service.session.sessionFile && api.service.session.sessionFile !== first);
@@ -262,14 +293,19 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await api.service.switchSession(first);
 		await until("switched back", () => api.service.session.sessionFile === first);
 		assert.ok(api.service.transcript.some(i => i.kind === "user"));
+		assert.ok(sentCommands().some(c => c.type === "switch_session" && c.sessionPath === first));
 	});
 
-	it("switches sessions by file path", async () => {
-		const first = api.service.session.sessionFile!;
+	it("offers the newest other saved sessions to the chat when the session changes", async () => {
+		await vscode.commands.executeCommand("omp.openConversation");
+		await until("chat view visible", () => api.chat.visible);
+		const previous = api.service.session.sessionFile!;
+		await api.service.prompt("recent session marker");
 		await api.service.newSession();
-		await until("new file", () => api.service.session.sessionFile && api.service.session.sessionFile !== first);
-		await vscode.commands.executeCommand("omp.switchSession", first);
-		await until("switched by command", () => api.service.session.sessionFile === first);
-		assert.ok(sentCommands().some(c => c.type === "switch_session" && c.sessionPath === first));
+		const current = await until("new file", () => api.service.session.sessionFile !== previous && api.service.session.sessionFile);
+		const offered = await until("recent sessions offered", () => api.chat.offeredSessions[0]?.path === previous && api.chat.offeredSessions);
+		assert.ok(offered.length <= 5);
+		assert.ok(!offered.some(s => s.path === current), "the current session is not offered");
+		assert.ok(offered.every(s => s.title.length > 0 && !s.title.includes("\n")));
 	});
 });

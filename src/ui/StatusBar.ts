@@ -32,7 +32,7 @@ export class OmpStatusBar implements vscode.Disposable {
 	private render(): void {
 		const service = this.service;
 		if (!service) {
-			this.item.text = this.unavailable ? "$(error) OMP: not found" : "OMP: stopped";
+			this.item.text = this.unavailable ? "$(error) OMP: unavailable" : "OMP: stopped";
 			this.item.tooltip = this.unavailable ?? "OMP is not running";
 			return;
 		}

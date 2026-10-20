@@ -1,6 +1,7 @@
-import { isRecord } from "./protocol";
+import { isRecord } from "../shared/guards";
 
 const NEWLINE = 0x0a;
+/** Line ceiling until the server advertises its frame limit, and for servers that never do. */
 const DEFAULT_MAX_LINE_BYTES = 8 * 1024 * 1024;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
@@ -19,11 +20,15 @@ export class JsonlDecoder {
 	#pendingBytes = 0;
 	#discarding = false;
 	readonly #utf8 = new TextDecoder("utf-8", { fatal: true });
+	/** Longest accepted line in bytes; longer lines are reported and dropped. */
+	maxLineBytes: number;
 
 	constructor(
 		private readonly handlers: JsonlHandlers,
-		private readonly maxLineBytes = DEFAULT_MAX_LINE_BYTES,
-	) {}
+		maxLineBytes = DEFAULT_MAX_LINE_BYTES,
+	) {
+		this.maxLineBytes = maxLineBytes;
+	}
 
 	push(chunk: Uint8Array): void {
 		const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);

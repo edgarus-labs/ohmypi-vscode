@@ -18,5 +18,11 @@ export function toModelView(model: ModelInfo): ModelView {
 		const { input, output, cacheRead, cacheWrite } = model.cost;
 		view.cost = { input, output, cacheRead, cacheWrite };
 	}
+	const identity: NonNullable<ModelView["identity"]> = {};
+	for (const key of ["class", "family", "revision"] as const) {
+		const value: unknown = model.identity?.[key];
+		if (typeof value === "string" && value) identity[key] = value;
+	}
+	if (Object.keys(identity).length > 0) view.identity = identity;
 	return view;
 }

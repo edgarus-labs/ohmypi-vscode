@@ -109,6 +109,23 @@ describe("PromptTracker phases", () => {
 		assert.deepEqual(phases, []);
 	});
 
+	it("does not carry an abort while yielded into the next prompt", () => {
+		const { t } = tracker();
+		t.submit("p1");
+		t.acknowledged("p1", true);
+		t.agentStart();
+		t.agentEnd(true);
+		t.promptResult(result("p1", { sessionSettled: false }));
+		assert.equal(t.phase, "yielded");
+		t.abortRequested();
+		assert.equal(t.phase, "yielded");
+		t.submit("p2");
+		assert.equal(t.phase, "submitting");
+		t.acknowledged("p2", true);
+		t.agentStart();
+		assert.equal(t.phase, "running");
+	});
+
 	it("carries the prompt_result error message", async () => {
 		const { t } = tracker();
 		const outcome = t.submit("p1");

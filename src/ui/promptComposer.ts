@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { PromptImage } from "../omp/api";
+import { formatPrompt } from "../shared/prompt";
 import type { Attachment } from "../webview/protocol";
 
 export interface ComposeInput {
@@ -10,11 +11,10 @@ export interface ComposeInput {
 	editorContext?: string;
 }
 
-/** Inside the working directory relative to it, otherwise absolute; quoted when OMP's mention syntax requires it. */
-function fileMention(filePath: string, cwd: string): string {
+/** Inside the working directory relative to it, otherwise absolute. */
+function mentionPath(filePath: string, cwd: string): string {
 	const relative = path.relative(cwd, filePath);
-	const shown = relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : filePath;
-	return /[\s"@]/.test(shown) ? `@"${shown}"` : `@${shown}`;
+	return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : filePath;
 }
 
 /**
@@ -23,16 +23,12 @@ function fileMention(filePath: string, cwd: string): string {
  * images travel in the RPC `images` field.
  */
 export function composePrompt({ text, attachments, cwd, editorContext }: ComposeInput): { message: string; images: PromptImage[] } {
-	const parts: string[] = [];
-	if (editorContext) parts.push(editorContext);
-	if (text) parts.push(text);
-	for (const attachment of attachments) {
-		if (attachment.kind !== "text") continue;
-		const body = attachment.text.replaceAll("</pasted-text>", "<\\/pasted-text>");
-		parts.push(`<pasted-text name="${attachment.label.replaceAll('"', "'")}">\n${body}\n</pasted-text>`);
-	}
-	const files = attachments.flatMap(attachment => (attachment.kind === "file" ? [fileMention(attachment.path, cwd)] : []));
-	if (files.length > 0) parts.push(`Attached: ${files.join(" ")}`);
+	const message = formatPrompt({
+		editorContext,
+		text,
+		pasted: attachments.flatMap(attachment => (attachment.kind === "text" ? [{ name: attachment.label, text: attachment.text }] : [])),
+		files: attachments.flatMap(attachment => (attachment.kind === "file" ? [mentionPath(attachment.path, cwd)] : [])),
+	});
 	const images = attachments.flatMap(attachment => (attachment.kind === "image" ? [{ data: attachment.data, mimeType: attachment.mimeType }] : []));
-	return { message: parts.join("\n\n"), images };
+	return { message, images };
 }

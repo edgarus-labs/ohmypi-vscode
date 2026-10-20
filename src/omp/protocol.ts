@@ -5,11 +5,6 @@
  * types still decode as {@link UnknownFrame}.
  */
 
-/** The single object guard for decoded wire values; fields remain `unknown`. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export interface TextContent {
 	type: "text";
 	text: string;
@@ -140,6 +135,12 @@ export interface ThinkingConfig {
 	defaultLevel?: string;
 }
 
+export interface ModelIdentity {
+	class?: string;
+	family?: string;
+	revision?: string;
+}
+
 export interface ModelInfo {
 	id: string;
 	name: string;
@@ -152,6 +153,8 @@ export interface ModelInfo {
 	contextWindow: number | null;
 	maxTokens: number | null;
 	thinking?: ThinkingConfig;
+	/** How OMP classifies the model: vendor class, family within it, and revision (e.g. `5.5.0`). */
+	identity?: ModelIdentity;
 }
 
 export interface TodoItem {
@@ -250,6 +253,7 @@ export interface CommandMap {
 	get_state: { params: undefined; result: SessionState };
 	set_fast_mode: { params: { enabled: boolean }; result: { enabled: boolean; active: boolean } };
 	set_ask_dialog: { params: { enabled: boolean }; result: { enabled: boolean } };
+	set_host_tools: { params: { tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> }; result: unknown };
 	set_subagent_subscription: { params: { level: "off" | "progress" | "events" }; result: { level: string } };
 	set_event_filter: {
 		params: { events: string[] | null; messageUpdates?: "full" | "delta" };
@@ -270,6 +274,18 @@ export interface CommandMap {
 	get_messages: { params: undefined; result: { messages: AgentMessage[] } };
 	get_messages_page: { params: { cursor?: string; limit?: number }; result: MessagesPage };
 	get_entries: { params: { since?: string } | undefined; result: { entries: SessionEntry[]; leafId: string | null } };
+	get_available_commands: { params: undefined; result: { commands: AvailableCommand[] } };
+}
+
+/** A slash command OMP accepts as a prompt starting with `/name`. */
+export interface AvailableCommand {
+	name: string;
+	aliases?: string[];
+	description?: string;
+	input?: { hint?: string };
+	subcommands?: Array<{ name: string; description?: string; usage?: string }>;
+	/** `builtin`, `skill`, `extension`, `custom`, `file`, … */
+	source: string;
 }
 
 /** A durable session journal entry (open record; only the fields read here are typed). */
@@ -306,15 +322,6 @@ export interface ResponseFrame {
 	code?: string;
 }
 
-export interface RpcChunkFrame {
-	type: "rpc_chunk";
-	chunkId: string;
-	index: number;
-	count: number;
-	byteLength: number;
-	data: string;
-}
-
 export interface PromptResultFrame {
 	type: "prompt_result";
 	agentInvoked: boolean;
@@ -322,10 +329,6 @@ export interface PromptResultFrame {
 	sessionSettled: boolean;
 	id?: string;
 	error?: { message: string; retryable: boolean; provider?: string; model?: string; httpStatus?: number };
-}
-
-export interface SessionSettledFrame {
-	type: "session_settled";
 }
 
 export interface AgentStartEvent {
@@ -458,8 +461,6 @@ export type SessionEvent =
 	| AutoRetryStartEvent
 	| AutoRetryEndEvent;
 
-export type SessionEventType = SessionEvent["type"];
-
 /**
  * Every session event type OMP 18.5 may emit. Types without a typed shape
  * above are still routed as session events (and ignored by the reducers).
@@ -549,6 +550,12 @@ export interface HostToolCallFrame {
 	arguments: Record<string, unknown>;
 }
 
+export interface HostToolCancelFrame {
+	type: "host_tool_cancel";
+	/** Request id of the `host_tool_call` OMP no longer needs. */
+	targetId: string;
+}
+
 export interface HostUriRequestFrame {
 	type: "host_uri_request";
 	id: string;
@@ -600,6 +607,11 @@ export interface ConfigUpdateFrame {
 	type: "config_update";
 	model?: ModelInfo;
 	thinkingLevel?: string;
+}
+
+export interface AvailableCommandsUpdateFrame {
+	type: "available_commands_update";
+	commands: AvailableCommand[];
 }
 
 export interface UnknownFrame {

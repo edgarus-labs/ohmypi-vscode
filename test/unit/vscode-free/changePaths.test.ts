@@ -1,6 +1,8 @@
 import * as assert from "node:assert/strict";
+import * as os from "node:os";
 import * as path from "node:path";
-import { lineDelta, resolveToolPath, toolArgPaths, toolResultFiles } from "../../../src/vscode/changePaths";
+import { toolArgPaths, toolResultFiles } from "../../../src/shared/toolFiles";
+import { isWithinRoots, lineDelta, resolveToolPath } from "../../../src/vscode/changePaths";
 
 const cwd = path.resolve("/work/repo");
 
@@ -10,11 +12,41 @@ describe("resolveToolPath", () => {
 		assert.equal(resolveToolPath(path.resolve("/abs/b.ts"), cwd), path.resolve("/abs/b.ts"));
 	});
 
+	it("expands a leading ~ with either separator to the home directory", () => {
+		assert.equal(resolveToolPath("~", cwd), os.homedir());
+		assert.equal(resolveToolPath("~/notes.md", cwd), path.join(os.homedir(), "notes.md"));
+		assert.equal(resolveToolPath("~\\notes.md", cwd), path.join(os.homedir(), "\\notes.md"));
+	});
+
 	it("ignores URLs and internal schemes", () => {
 		assert.equal(resolveToolPath("xd://ast_grep", cwd), undefined);
 		assert.equal(resolveToolPath("https://example.com/a", cwd), undefined);
 		assert.equal(resolveToolPath("skill://rules", cwd), undefined);
 		assert.equal(resolveToolPath("", cwd), undefined);
+	});
+});
+
+describe("isWithinRoots", () => {
+	it("accepts a root and paths below it, case-insensitively on Windows", () => {
+		assert.equal(isWithinRoots("D:\\work\\repo", ["D:\\work\\repo"], path.win32), true);
+		assert.equal(isWithinRoots("d:\\Work\\Repo\\src\\a.ts", ["D:\\work\\repo"], path.win32), true);
+		assert.equal(isWithinRoots("/work/repo/..data/a", ["/work/repo"], path.posix), true);
+		assert.equal(isWithinRoots("/other/b.ts", ["/work/repo", "/other"], path.posix), true);
+	});
+
+	it("rejects paths outside every root", () => {
+		assert.equal(isWithinRoots("D:\\work\\repo2\\a.ts", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("D:\\work\\a.ts", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("E:\\work\\repo\\a.ts", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("/etc/passwd", ["/work/repo"], path.posix), false);
+		assert.equal(isWithinRoots("/work/a", [], path.posix), false);
+	});
+
+	it("rejects UNC paths outside the roots and Windows device paths", () => {
+		assert.equal(isWithinRoots("\\\\attacker\\share\\x", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("\\\\?\\D:\\work\\repo\\a.ts", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("\\\\.\\D:\\work\\repo\\a.ts", ["D:\\work\\repo"], path.win32), false);
+		assert.equal(isWithinRoots("\\\\server\\share\\repo\\a.ts", ["\\\\server\\share\\repo"], path.win32), true);
 	});
 });
 

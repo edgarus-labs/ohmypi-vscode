@@ -1,42 +1,42 @@
 import * as vscode from "vscode";
 import type { Logger } from "../omp/api";
+import { describeError } from "../shared/errors";
 
 type Level = "error" | "warn" | "info" | "debug";
 const RANK: Record<Level, number> = { error: 0, warn: 1, info: 2, debug: 3 };
 
-function describeError(error: unknown): string {
-	if (error instanceof Error) return error.stack ?? `${error.name}: ${error.message}`;
-	return String(error);
-}
-
-/** Output-channel logger filtered by `omp.logLevel`; RPC frames only when `omp.traceRpc` is on. Settings are read live. */
+/** Output-channel logger filtered by `omp.logLevel`; `traceEnabled` follows `omp.traceRpc`. Both settings are read on every use. */
 export class OutputLogger implements Logger {
 	constructor(private readonly channel: vscode.OutputChannel) {}
 
-	private write(level: Level, message: string): void {
+	get traceEnabled(): boolean {
+		return vscode.workspace.getConfiguration("omp").get<boolean>("traceRpc", false);
+	}
+
+	private write(level: Level, message: string, error: unknown): void {
 		const configured = vscode.workspace.getConfiguration("omp").get<Level>("logLevel", "info");
 		if (RANK[level] > (RANK[configured] ?? RANK.info)) return;
-		this.channel.appendLine(`${new Date().toISOString()} [${level}] ${message}`);
+		const text = error === undefined ? message : `${message}: ${describeError(error)}`;
+		this.channel.appendLine(`${new Date().toISOString()} [${level}] ${text}`);
 	}
 
 	error(message: string, error?: unknown): void {
-		this.write("error", error === undefined ? message : `${message}: ${describeError(error)}`);
+		this.write("error", message, error);
 	}
 
-	warn(message: string): void {
-		this.write("warn", message);
+	warn(message: string, error?: unknown): void {
+		this.write("warn", message, error);
 	}
 
-	info(message: string): void {
-		this.write("info", message);
+	info(message: string, error?: unknown): void {
+		this.write("info", message, error);
 	}
 
-	debug(message: string): void {
-		this.write("debug", message);
+	debug(message: string, error?: unknown): void {
+		this.write("debug", message, error);
 	}
 
 	trace(direction: "in" | "out", frame: string): void {
-		if (!vscode.workspace.getConfiguration("omp").get<boolean>("traceRpc", false)) return;
 		this.channel.appendLine(`${new Date().toISOString()} [trace] ${direction === "in" ? "<-" : "->"} ${frame}`);
 	}
 }

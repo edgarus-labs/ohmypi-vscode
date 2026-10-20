@@ -94,6 +94,18 @@ describe("SessionStore transcript", () => {
 		assert.deepEqual(s.transcript, [{ kind: "user", id: "u-1", text: "hi", imageCount: 1 }]);
 	});
 
+	it("records a user message without messageId once across start and end", () => {
+		const { s, apply } = store();
+		apply({ type: "message_start", message: { role: "user", content: "hi", timestamp: 1 } });
+		apply({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 } });
+		apply({ type: "message_start", message: { role: "user", content: "again", timestamp: 2 } });
+		apply({ type: "message_end", message: { role: "user", content: "again", timestamp: 2 } });
+		assert.deepEqual(
+			s.transcript.map(i => i.kind === "user" && i.text),
+			["hi", "again"],
+		);
+	});
+
 	it("tracks tool executions with partial output, results and details", () => {
 		const { s, apply, tools } = store();
 		apply({ type: "tool_execution_start", toolCallId: "t1", toolName: "edit", args: { path: "a.ts" } });
@@ -170,9 +182,9 @@ describe("SessionStore transcript", () => {
 			],
 		);
 		apply({ type: "agent_start" });
-		assert.equal(s.session.isStreaming, true);
 		apply({ type: "agent_end", messages: [] });
-		assert.equal(s.session.isStreaming, false);
+		s.applyState({ sessionId: "s1", isStreaming: true });
+		assert.ok(!("isStreaming" in s.session), "phase is the only busy signal");
 	});
 
 	it("maps get_state into the session view", () => {
@@ -242,15 +254,22 @@ describe("historyToItems", () => {
 		const items = historyToItems(messages);
 		assert.deepEqual(
 			items.map(i => i.kind),
-			["user", "assistant", "tool", "tool", "command_output"],
+			["user", "assistant", "tool", "tool", "turn_summary", "command_output"],
 		);
-		const [, a, t1, t2, out] = items;
+		const [, a, t1, t2, , out] = items;
 		assert.equal(a.kind === "assistant" && a.text, "Reading");
 		assert.ok(t1.kind === "tool" && t1.status === "done" && t1.result?.text === "contents");
 		assert.ok(t2.kind === "tool" && t2.status === "error" && t2.result?.isError);
 		assert.deepEqual(t2.kind === "tool" && t2.result?.details, { path: "a" });
 		assert.equal(out.kind === "command_output" && out.text, "$ ls\na\nb");
 		assert.equal(new Set(items.map(i => i.id)).size, items.length, "ids are unique");
+	});
+
+	it("marks a stored tool call without a result as unresolved, not failed", () => {
+		const items = historyToItems([
+			assistant([{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "sleep 100" } }], { timestamp: 7 }),
+		]);
+		assert.deepEqual(items[1], { kind: "tool", id: "t1", name: "bash", args: { command: "sleep 100" }, status: "unresolved", startedAt: 7 });
 	});
 
 	it("resets the store transcript and cost from history", () => {
@@ -260,7 +279,285 @@ describe("historyToItems", () => {
 			reset = items;
 		});
 		s.reset([{ role: "user", content: "x", timestamp: 1 }, assistant([{ type: "text", text: "y" }])]);
-		assert.equal(reset?.length, 2);
+		assert.deepEqual(reset?.map(item => item.kind), ["user", "assistant", "turn_summary"]);
 		assert.equal(s.session.costUsd, 0.01);
+	});
+});
+
+describe("SessionStore pending user items", () => {
+	const userMessage = (text: string) => ({ role: "user", content: text, timestamp: 1 });
+	const users = (items: readonly TranscriptItem[]) => items.filter(item => item.kind === "user").map(item => ({ ...item }));
+
+	it("shows a pending item at once and lets the next OMP user message replace it in place", () => {
+		const { s, changes, apply } = store();
+		apply({ type: "message_end", messageId: "a-0", message: assistant([{ type: "text", text: "earlier" }]) });
+		const id = s.addPendingUser("hi", 1);
+		assert.deepEqual(changes.at(-1), { kind: "user", id, text: "hi", imageCount: 1, pending: true });
+		apply({ type: "message_start", messageId: "u-1", message: userMessage("<editor-context>x</editor-context>\n\nhi") });
+		apply({ type: "message_end", messageId: "u-1", message: userMessage("<editor-context>x</editor-context>\n\nhi") });
+		assert.deepEqual(s.transcript.map(item => item.id), ["a-0", id]);
+		assert.deepEqual(users(s.transcript), [{ kind: "user", id, text: "<editor-context>x</editor-context>\n\nhi" }]);
+	});
+
+	it("matches pending items to OMP user messages in FIFO order", () => {
+		const { s, apply } = store();
+		const first = s.addPendingUser("one", 0);
+		const second = s.addPendingUser("two", 0);
+		apply({ type: "message_start", messageId: "u-1", message: userMessage("one") });
+		apply({ type: "message_end", messageId: "u-1", message: userMessage("one") });
+		assert.deepEqual(users(s.transcript), [
+			{ kind: "user", id: first, text: "one" },
+			{ kind: "user", id: second, text: "two", pending: true },
+		]);
+		apply({ type: "message_start", message: userMessage("two") });
+		assert.deepEqual(users(s.transcript), [
+			{ kind: "user", id: first, text: "one" },
+			{ kind: "user", id: second, text: "two" },
+		]);
+		apply({ type: "message_start", messageId: "u-3", message: userMessage("three") });
+		assert.deepEqual(users(s.transcript).map(item => item.text), ["one", "two", "three"]);
+	});
+
+	it("keeps a typed slash command visible and carries the text OMP expanded it to", () => {
+		const { s, apply } = store();
+		const id = s.addPendingUser("/review src", 0);
+		apply({ type: "message_start", messageId: "u-1", message: userMessage("Review the code in src.") });
+		assert.deepEqual(users(s.transcript), [{ kind: "user", id, text: "/review src", expandedText: "Review the code in src." }]);
+	});
+
+	it("keeps a pending item OMP never recorded once its prompt completes, no longer pending", () => {
+		const { s, changes } = store();
+		const id = s.addPendingUser("/rules", 0);
+		s.confirmPendingUser(id);
+		assert.deepEqual(users(s.transcript), [{ kind: "user", id, text: "/rules" }]);
+		assert.deepEqual(changes.at(-1), { kind: "user", id, text: "/rules" });
+		s.addCommandOutput("rules: none");
+		assert.deepEqual(s.transcript.map(item => item.kind), ["user", "command_output"]);
+	});
+
+	it("removes a pending item whose prompt OMP never admitted and resets the transcript", () => {
+		const { s, apply } = store();
+		apply({ type: "message_end", messageId: "a-0", message: assistant([{ type: "text", text: "earlier" }]) });
+		const id = s.addPendingUser("lost", 0);
+		let reset: string[] | undefined;
+		s.onDidReset(items => {
+			reset = items.map(item => item.id);
+		});
+		s.removePendingUser(id);
+		assert.deepEqual(reset, ["a-0"]);
+		assert.deepEqual(s.transcript.map(item => item.id), ["a-0"]);
+		s.addNotice("info", "after");
+		assert.deepEqual(s.transcript.map(item => item.kind), ["assistant", "notice"]);
+	});
+
+	it("leaves reconciled items alone when asked to remove or confirm them", () => {
+		const { s, apply } = store();
+		const id = s.addPendingUser("hi", 0);
+		apply({ type: "message_start", messageId: "u-1", message: userMessage("hi") });
+		s.removePendingUser(id);
+		s.confirmPendingUser(id);
+		assert.deepEqual(users(s.transcript), [{ kind: "user", id, text: "hi" }]);
+	});
+
+	it("keeps still-pending items after a history reset and drops the rest", () => {
+		const { s, apply } = store();
+		const kept = s.addPendingUser("/rules", 0);
+		s.confirmPendingUser(kept);
+		const waiting = s.addPendingUser("hello", 0);
+		s.reset([userMessage("old"), assistant([{ type: "text", text: "reply" }])]);
+		assert.deepEqual(users(s.transcript), [
+			{ kind: "user", id: "h0", text: "old" },
+			{ kind: "user", id: waiting, text: "hello", pending: true },
+		]);
+		apply({ type: "message_start", messageId: "u-9", message: userMessage("hello") });
+		assert.deepEqual(users(s.transcript).map(item => [item.id, item.pending]), [["h0", undefined], [waiting, undefined]]);
+	});
+});
+
+describe("SessionStore turn summaries", () => {
+	/** Usage as OMP reports it; without `total`, as a provider that reports no cost would. */
+	const tokens = (input: number, output: number, cacheRead: number, cacheWrite: number, total?: number) =>
+		({
+			input,
+			output,
+			cacheRead,
+			cacheWrite,
+			totalTokens: input + output + cacheRead + cacheWrite,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...(total === undefined ? {} : { total }) },
+		}) as AssistantMessage["usage"];
+	const userMessage = (text: string) => ({ role: "user", content: text, timestamp: 1 });
+
+	function timed() {
+		const clock = { now: 1_000 };
+		const s = new SessionStore(undefined, () => clock.now);
+		const changes: TranscriptItem[] = [];
+		s.onDidChangeItem(item => changes.push(item));
+		return { s, clock, changes, apply: (e: object) => s.applyEvent(e as SessionEvent) };
+	}
+
+	const summaries = (items: readonly TranscriptItem[]) => items.filter(item => item.kind === "turn_summary").map(item => ({ ...item }));
+
+	it("appends the duration, summed usage and cost of a finished turn after its last item", () => {
+		const { s, clock, changes, apply } = timed();
+		s.update({ phase: "submitting" });
+		apply({ type: "agent_start" });
+		s.update({ phase: "running" });
+		apply({ type: "message_end", messageId: "u-1", message: userMessage("fix it") });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([{ type: "toolCall", id: "t1", name: "read", arguments: {} }], { stopReason: "toolUse", usage: tokens(100, 20, 1_000, 50, 0.01) }) });
+		apply({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: {} });
+		apply({ type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: { content: [] } });
+		apply({ type: "message_end", messageId: "a-2", message: assistant([{ type: "text", text: "done" }], { usage: tokens(200, 30, 2_000, 0, 0.02) }) });
+		apply({ type: "agent_end", messages: [] });
+		clock.now = 73_000;
+		s.update({ phase: "idle" });
+		assert.deepEqual(s.transcript.map(item => item.kind), ["user", "assistant", "tool", "assistant", "turn_summary"]);
+		const [summary] = summaries(s.transcript);
+		assert.deepEqual(summary, {
+			kind: "turn_summary",
+			id: summary.id,
+			status: "completed",
+			durationMs: 72_000,
+			usage: { input: 300, output: 50, cacheRead: 3_000, cacheWrite: 50, costUsd: 0.03 },
+		});
+		assert.equal(changes.at(-1)?.kind, "turn_summary");
+		assert.equal(new Set(s.transcript.map(item => item.id)).size, s.transcript.length, "ids are unique");
+	});
+
+	it("reports the start and the output tokens of the turn in progress", () => {
+		const { s, clock, apply } = timed();
+		s.update({ phase: "submitting" });
+		assert.deepEqual(s.session.turn, { startedAt: 1_000, outputTokens: 0 });
+		clock.now = 5_000;
+		s.update({ phase: "running" });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([{ type: "text", text: "x" }], { stopReason: "toolUse", usage: tokens(1, 1_200, 0, 0) }) });
+		assert.deepEqual(s.session.turn, { startedAt: 1_000, outputTokens: 1_200 });
+		s.update({ phase: "idle" });
+		assert.equal("turn" in s.session, false);
+	});
+
+	it("marks a turn stopped when it was aborted and failed when OMP reported an error", () => {
+		const { s, apply } = timed();
+		s.update({ phase: "running" });
+		apply({ type: "agent_start" });
+		s.update({ phase: "aborting" });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([], { stopReason: "aborted" }) });
+		s.update({ phase: "idle" });
+		s.update({ phase: "submitting" });
+		apply({ type: "agent_start" });
+		apply({ type: "message_end", messageId: "a-2", message: assistant([], { stopReason: "error", errorMessage: "overloaded" }) });
+		s.noteTurnOutcome("error");
+		s.update({ phase: "idle" });
+		assert.deepEqual(summaries(s.transcript).map(item => item.kind === "turn_summary" && item.status), ["aborted", "error"]);
+	});
+
+	it("takes OMP's outcome over a failed reply that a retry recovered from", () => {
+		const { s, apply } = timed();
+		s.update({ phase: "submitting" });
+		apply({ type: "agent_start" });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([], { stopReason: "error", errorMessage: "overloaded" }) });
+		apply({ type: "message_end", messageId: "a-2", message: assistant([{ type: "text", text: "ok" }]) });
+		s.noteTurnOutcome("completed");
+		s.update({ phase: "idle" });
+		assert.deepEqual(summaries(s.transcript).map(item => item.kind === "turn_summary" && item.status), ["completed"]);
+	});
+
+	it("adds no summary for a prompt the agent never worked on", () => {
+		const { s } = timed();
+		s.update({ phase: "submitting" });
+		s.addCommandOutput("No rules.");
+		s.update({ phase: "idle" });
+		assert.deepEqual(s.transcript.map(item => item.kind), ["command_output"]);
+		assert.equal("turn" in s.session, false);
+	});
+
+	it("ends the turn at the prompt result and summarizes background work that wakes the agent as its own turn", () => {
+		const { s, clock, apply } = timed();
+		s.update({ phase: "submitting" });
+		apply({ type: "agent_start" });
+		s.update({ phase: "running" });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([{ type: "text", text: "started a job" }]) });
+		clock.now = 4_000;
+		s.update({ phase: "yielded" });
+		clock.now = 10_000;
+		apply({ type: "agent_start" });
+		assert.deepEqual(s.session.turn, { startedAt: 10_000, outputTokens: 0 });
+		s.update({ phase: "running" });
+		apply({ type: "message_end", messageId: "a-2", message: assistant([{ type: "text", text: "job done" }]) });
+		clock.now = 12_500;
+		s.update({ phase: "yielded" });
+		s.update({ phase: "idle" });
+		assert.deepEqual(s.transcript.map(item => item.kind), ["assistant", "turn_summary", "assistant", "turn_summary"]);
+		assert.deepEqual(summaries(s.transcript).map(item => item.kind === "turn_summary" && item.durationMs), [3_000, 2_500]);
+	});
+
+	it("leaves out a cost no reply reported", () => {
+		const { s, apply } = timed();
+		s.update({ phase: "running" });
+		apply({ type: "agent_start" });
+		apply({ type: "message_end", messageId: "a-1", message: assistant([], { usage: tokens(5, 6, 0, 0) }) });
+		s.update({ phase: "idle" });
+		assert.deepEqual(summaries(s.transcript).map(item => item.kind === "turn_summary" && item.usage), [{ input: 5, output: 6, cacheRead: 0, cacheWrite: 0 }]);
+	});
+});
+
+describe("historyToItems turn summaries", () => {
+	const userAt = (text: string, timestamp: number) => ({ role: "user", content: text, timestamp });
+	const toolResultAt = (toolCallId: string, timestamp: number) => ({ role: "toolResult", toolCallId, toolName: "read", content: [], isError: false, timestamp });
+	const kinds = (items: readonly TranscriptItem[]) => items.map(item => item.kind);
+	const summaries = (items: readonly TranscriptItem[]) => items.flatMap(item => (item.kind === "turn_summary" ? [{ ...item }] : []));
+
+	it("summarizes each stored turn after its last item, timed by its messages", () => {
+		const items = historyToItems([
+			userAt("fix it", 10_000),
+			assistant([{ type: "toolCall", id: "t1", name: "read", arguments: {} }], { stopReason: "toolUse", timestamp: 11_000 }),
+			toolResultAt("t1", 15_000),
+			assistant([{ type: "text", text: "fixed" }], { timestamp: 82_000 }),
+			{ role: "bashExecution", command: "ls", output: "a", cancelled: false, truncated: false, timestamp: 90_000 },
+			userAt("again", 100_000),
+			assistant([{ type: "text", text: "no" }], { stopReason: "aborted", timestamp: 103_000 }),
+		]);
+		assert.deepEqual(kinds(items), ["user", "assistant", "tool", "assistant", "turn_summary", "command_output", "user", "assistant", "turn_summary"]);
+		const [first, second] = summaries(items);
+		assert.deepEqual(first, {
+			kind: "turn_summary",
+			id: first.id,
+			status: "completed",
+			durationMs: 72_000,
+			usage: { input: 20, output: 10, cacheRead: 2, cacheWrite: 4, costUsd: 0.02 },
+		});
+		assert.equal(second.status, "aborted");
+		assert.equal(second.durationMs, 3_000);
+		assert.equal(new Set(items.map(item => item.id)).size, items.length, "ids are unique");
+	});
+
+	it("keeps a message steering a run that was still calling tools in the same turn", () => {
+		const items = historyToItems([
+			userAt("start", 1_000),
+			assistant([{ type: "toolCall", id: "t1", name: "read", arguments: {} }], { stopReason: "toolUse", timestamp: 2_000 }),
+			toolResultAt("t1", 3_000),
+			userAt("also check b", 3_500),
+			assistant([{ type: "text", text: "both done" }], { stopReason: "error", errorMessage: "boom", timestamp: 6_000 }),
+		]);
+		assert.deepEqual(kinds(items), ["user", "assistant", "tool", "user", "assistant", "turn_summary"]);
+		assert.deepEqual(summaries(items).map(item => [item.status, item.durationMs]), [["error", 5_000]]);
+	});
+
+	it("adds no summary to a run the history ends in the middle of, nor to a turn without a reply", () => {
+		const items = historyToItems([
+			userAt("/rules", 1_000),
+			userAt("go", 2_000),
+			assistant([{ type: "toolCall", id: "t1", name: "bash", arguments: {} }], { stopReason: "toolUse", timestamp: 3_000 }),
+		]);
+		assert.deepEqual(kinds(items), ["user", "user", "assistant", "tool"]);
+	});
+
+	it("omits the duration when the messages carry no timestamps", () => {
+		const items = historyToItems([
+			{ role: "user", content: "hi" } as AgentMessage,
+			assistant([{ type: "text", text: "hello" }], { timestamp: undefined as unknown as number }),
+		]);
+		const [summary] = summaries(items);
+		assert.equal(summary.status, "completed");
+		assert.equal("durationMs" in summary, false);
 	});
 });

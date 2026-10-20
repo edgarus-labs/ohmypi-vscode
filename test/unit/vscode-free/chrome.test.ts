@@ -1,5 +1,5 @@
 import * as assert from "node:assert/strict";
-import { effortChoices, elapsedText, isAtBottom, stateWord, todoSummary, usageText } from "../../../src/webview/chrome";
+import { composerAction, isAtBottom, stateWord, todoSummary, usageText } from "../../../src/webview/chrome";
 
 describe("conversation chrome helpers", () => {
 	it("derives the header state word", () => {
@@ -35,40 +35,17 @@ describe("conversation chrome helpers", () => {
 		assert.equal(usageText({ contextUsage: { tokens: 1, contextWindow: 2, percent: 50 }, costUsd: 3.456 }), "ctx 50% · $3.46");
 	});
 
-	it("formats elapsed time", () => {
-		assert.equal(elapsedText(0), "0s");
-		assert.equal(elapsedText(12_400), "12s");
-		assert.equal(elapsedText(65_000), "1m 05s");
-		assert.equal(elapsedText(3_725_000), "1h 02m");
-		assert.equal(elapsedText(-5), "0s");
-	});
-
 	it("detects the bottom of a scroll container", () => {
 		assert.equal(isAtBottom(1000, 600, 400), true);
 		assert.equal(isAtBottom(1000, 590, 400), true);
 		assert.equal(isAtBottom(1000, 500, 400), false);
 		assert.equal(isAtBottom(300, 0, 400), true);
 	});
-});
 
-describe("effortChoices", () => {
-	const levels = ["off", "auto", "low", "medium", "high"];
-
-	it("selects the user's selector, not the effective level", () => {
-		const choices = effortChoices({ availableThinkingLevels: levels, thinkingSelector: "auto", thinkingLevel: "high" });
-		assert.equal(choices.value, "auto");
-		assert.deepEqual(
-			choices.options.map(option => option.label),
-			["off", "auto", "low", "medium", "high"],
-		);
-	});
-
-	it("shows what auto resolved to once OMP classified the turn", () => {
-		const choices = effortChoices({ availableThinkingLevels: levels, thinkingSelector: "auto", thinkingLevel: "low", thinkingResolved: "low" });
-		assert.equal(choices.options.find(option => option.value === "auto")?.label, "auto · low");
-	});
-
-	it("falls back to the effective level when the selector is unknown", () => {
-		assert.equal(effortChoices({ availableThinkingLevels: levels, thinkingLevel: "medium" }).value, "medium");
+	it("picks the primary composer action: send when idle, steer with text while busy, else stop", () => {
+		assert.equal(composerAction({ busy: false, hasContent: false }), "send");
+		assert.equal(composerAction({ busy: false, hasContent: true }), "send");
+		assert.equal(composerAction({ busy: true, hasContent: true }), "steer");
+		assert.equal(composerAction({ busy: true, hasContent: false }), "stop");
 	});
 });

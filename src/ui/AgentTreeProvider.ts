@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { AgentStatus, AgentView, Disposable, OmpServiceApi } from "../omp/api";
-import { formatCost, formatDuration } from "./format";
+import { formatCost, formatDuration } from "../shared/format";
 import { agentRowDescription, agentRowLabel, agentsSummary, sortAgents } from "./treeRows";
 
 const ICON_BY_STATUS: Record<AgentStatus, vscode.ThemeIcon> = {
@@ -86,7 +86,7 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vs
 	private tooltip(agent: AgentView): vscode.MarkdownString {
 		const tooltip = new vscode.MarkdownString(undefined, true);
 		tooltip.supportHtml = false;
-		tooltip.appendMarkdown(`**${agent.name}** \`${agent.id}\`\n\n`);
+		tooltip.appendMarkdown("**").appendText(agent.name).appendMarkdown("** ").appendText(`(${agent.id})`).appendMarkdown("\n\n");
 		const lines: string[] = [`status: ${agent.status}`];
 		if (agent.model) lines.push(`model: ${agent.model}`);
 		if (agent.description) lines.push(agent.description);

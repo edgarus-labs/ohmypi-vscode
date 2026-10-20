@@ -2,17 +2,11 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { OmpExtensionApi } from "../../src/extension";
 import type { OmpServiceApi } from "../../src/omp/api";
 
-/**
- * Runs against a real OMP installation (`OMP_IT_REAL=1`). Sends real model
- * requests, so it is opt-in and not part of `npm test`.
- */
-interface TestApi {
-	service: OmpServiceApi;
-	chat: { lastRendered?: { counts: Record<string, number>; lastAssistantText?: string } };
-	changes: { readonly changes: ReadonlyArray<{ path: string }> };
-}
+/** The suite starts only once OMP is ready, so the service is always present. */
+type ReadyApi = OmpExtensionApi & { readonly service: OmpServiceApi };
 
 const workspace = process.env.OMP_IT_WORKSPACE!;
 
@@ -27,14 +21,19 @@ async function until<T>(what: string, probe: () => T | undefined | null | false 
 	}
 }
 
+/**
+ * Runs against a real OMP installation (`npm run test:real`). Sends real model
+ * requests, so it is opt-in and not part of `npm test`.
+ */
 describe("oh-my-pi extension (real OMP)", function () {
 	this.timeout(240_000);
-	let api: TestApi;
+	let api: ReadyApi;
 
 	before(async () => {
-		api = await vscode.extensions.getExtension<TestApi>("oh-my-pi.oh-my-pi")!.activate();
+		const activated = await vscode.extensions.getExtension<OmpExtensionApi>("oh-my-pi.oh-my-pi")!.activate();
 		await vscode.commands.executeCommand("omp.openConversation");
-		await until("ready", () => api.service?.connection.state === "ready", 60_000);
+		await until("ready", () => activated.service?.connection.state === "ready", 60_000);
+		api = activated as ReadyApi;
 	});
 
 	it("connects with protocol v2 and discovers configured models", async () => {

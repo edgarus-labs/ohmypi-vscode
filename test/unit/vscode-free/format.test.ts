@@ -1,49 +1,20 @@
 import * as assert from "node:assert/strict";
-import type { AgentView, ModelView, TranscriptItem } from "../../../src/omp/api";
-import {
-	agentSummaryMarkdown,
-	formatBytes,
-	formatDuration,
-	formatModelDetail,
-	relativeTime,
-	transcriptToMarkdown,
-} from "../../../src/ui/format";
+import type { AgentView, TranscriptItem } from "../../../src/omp/api";
+import { agentSummaryMarkdown, formatBytes, sessionTitle, transcriptToMarkdown } from "../../../src/ui/format";
 
 describe("format helpers", () => {
-	it("formats relative time", () => {
-		const now = 1_000_000_000;
-		assert.equal(relativeTime(now - 5_000, now), "just now");
-		assert.equal(relativeTime(now - 5 * 60_000, now), "5m ago");
-		assert.equal(relativeTime(now - 3 * 3_600_000, now), "3h ago");
-		assert.equal(relativeTime(now - 2 * 86_400_000, now), "2d ago");
+	it("titles a session by title, first message, or file name without extension", () => {
+		const file = "/s/2026-10-04_abc.jsonl";
+		assert.equal(sessionTitle({ title: "  Fix\n login  ", firstMessage: "ignored", path: file }), "Fix login");
+		assert.equal(sessionTitle({ firstMessage: "hello\n\nworld", path: file }), "hello world");
+		assert.equal(sessionTitle({ title: " ", firstMessage: "x".repeat(150), path: file }), "x".repeat(150));
+		assert.equal(sessionTitle({ title: "", firstMessage: "", path: file }), "2026-10-04_abc");
 	});
 
-	it("formats bytes and durations", () => {
+	it("formats bytes", () => {
 		assert.equal(formatBytes(512), "512 B");
 		assert.equal(formatBytes(2048), "2.0 KB");
 		assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
-		assert.equal(formatDuration(850), "850ms");
-		assert.equal(formatDuration(12_300), "12.3s");
-		assert.equal(formatDuration(125_000), "2m 5s");
-	});
-
-	it("formats a model detail line", () => {
-		const model: ModelView = {
-			provider: "anthropic",
-			id: "claude",
-			name: "Claude",
-			contextWindow: 200_000,
-			maxTokens: 64_000,
-			reasoning: true,
-			thinkingEfforts: ["low", "high"],
-			input: ["text", "image"],
-			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-		};
-		assert.equal(formatModelDetail(model), "ctx 200k · out 64k · reasoning: low, high · in: text, image · $3/$15 per Mtok");
-		assert.equal(
-			formatModelDetail({ provider: "p", id: "m", name: "m", reasoning: false, thinkingEfforts: [], input: ["text"] }),
-			"in: text",
-		);
 	});
 
 	it("renders an agent summary", () => {
@@ -81,5 +52,13 @@ describe("format helpers", () => {
 		assert.ok(md.includes("### Tool `read` — done"));
 		assert.ok(md.includes("```\nbody\n```"));
 		assert.ok(md.includes("**error:** bad"));
+	});
+
+	it("renders a turn summary as one italic line", () => {
+		const md = transcriptToMarkdown("Agent main", [
+			{ kind: "assistant", id: "a", text: "done", thinking: "", streaming: false },
+			{ kind: "turn_summary", id: "s", status: "aborted", durationMs: 12_000, usage: { input: 1_200, output: 300, cacheRead: 0, cacheWrite: 0, costUsd: 0.0123 } },
+		]);
+		assert.ok(md.endsWith("done\n\n_Stopped after 12s · 1.2k in · 300 out · $0.0123_\n"), md);
 	});
 });

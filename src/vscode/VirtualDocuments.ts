@@ -8,8 +8,11 @@ export class VirtualDocuments implements vscode.TextDocumentContentProvider {
 	private readonly contents = new Map<string, string>();
 	private sequence = 0;
 
+	/** Throws when the content is no longer kept, so VS Code shows an error instead of an empty document. */
 	provideTextDocumentContent(uri: vscode.Uri): string {
-		return this.contents.get(uri.toString()) ?? "";
+		const content = this.contents.get(uri.toString());
+		if (content === undefined) throw new Error("This OMP document is no longer available; open it again from where it was shown.");
+		return content;
 	}
 
 	/** `name` should carry the extension that selects the language, e.g. `agent.md`. */

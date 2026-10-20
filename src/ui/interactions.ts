@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import type { Disposable, InteractionRequest, InteractionResponse, Logger, OmpServiceApi, PresentationRequest } from "../omp/api";
+import { errorMessage } from "../shared/errors";
+import { statusDisplayText } from "../shared/router";
 import type { PendingInteraction } from "../webview/protocol";
-import { errorMessage } from "./guards";
 
 /** The conversation panel as seen by interaction/presentation handling. */
 export interface InteractionSurface {
@@ -55,14 +56,15 @@ export class InteractionController implements vscode.Disposable {
 			this.logger.debug(`Ignoring answer for interaction ${id}: no longer pending`);
 			return;
 		}
-		this.close(id);
-		this.logger.info(`Interaction ${id} (${entry.pending.request.kind}) answered: ${response.kind}`);
 		try {
 			this.service.respondInteraction(id, response);
 		} catch (error) {
 			this.logger.error(`Failed to answer interaction ${id}`, error);
 			void vscode.window.showErrorMessage(`OMP: failed to send your answer: ${errorMessage(error)}`);
+			return;
 		}
+		this.close(id);
+		this.logger.info(`Interaction ${id} (${entry.pending.request.kind}) answered: ${response.kind}`);
 	}
 
 	private add(request: InteractionRequest): void {
@@ -71,7 +73,9 @@ export class InteractionController implements vscode.Disposable {
 		this.entries.set(request.id, { pending });
 		this.logger.info(`Interaction ${request.id} (${request.kind}) requested`);
 		this.surface.showInteraction(pending);
-		if (!this.surface.visible) void this.notifyNatively(request);
+		if (!this.surface.visible) {
+			this.notifyNatively(request).catch(error => this.logger.error(`Native notification for interaction ${request.id} failed`, error));
+		}
 	}
 
 	private cancelled(id: string): void {
@@ -131,7 +135,7 @@ export class InteractionController implements vscode.Disposable {
 			}
 			case "input": {
 				const value = await vscode.window.showInputBox(
-					{ title: request.title, prompt: request.title, placeHolder: request.placeholder, password: request.secret, ignoreFocusOut: true },
+					{ title: request.title, prompt: request.title, placeHolder: request.placeholder, ignoreFocusOut: true },
 					token,
 				);
 				return value === undefined ? undefined : { kind: "value", value };
@@ -151,18 +155,27 @@ export class InteractionController implements vscode.Disposable {
 /** Fire-and-forget presentation requests (notify, status, openUrl, editorText). */
 export class PresentationHandler implements vscode.Disposable {
 	private readonly statusItems = new Map<string, vscode.StatusBarItem>();
-	private subscription: Disposable | undefined;
+	private subscriptions: Disposable[] = [];
 
 	constructor(
 		private readonly surface: InteractionSurface,
 		private readonly logger: Logger,
 	) {}
 
+	/** Status items belong to one OMP process: they go when the service changes or its process stops. */
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscription?.dispose();
-		this.subscription = service?.onPresentation(request => {
-			this.handle(request).catch(error => this.logger.error(`Presentation ${request.kind} failed`, error));
-		});
+		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.clearStatusItems();
+		this.subscriptions = service
+			? [
+					service.onPresentation(request => {
+						this.handle(request).catch(error => this.logger.error(`Presentation ${request.kind} failed`, error));
+					}),
+					service.onDidChangeConnection(status => {
+						if (status.state !== "ready") this.clearStatusItems();
+					}),
+				]
+			: [];
 	}
 
 	private async handle(request: PresentationRequest): Promise<void> {
@@ -189,8 +202,8 @@ export class PresentationHandler implements vscode.Disposable {
 					item.name = `OMP ${request.key}`;
 					this.statusItems.set(request.key, item);
 				}
-				item.text = request.text;
-				item.tooltip = `OMP: ${request.key}`;
+				item.text = statusDisplayText(request.key, request.text);
+				item.tooltip = item.text === request.text ? `OMP: ${request.key}` : `OMP: ${request.key}\n${request.text}`;
 				item.show();
 				return;
 			}
@@ -211,9 +224,13 @@ export class PresentationHandler implements vscode.Disposable {
 		}
 	}
 
-	dispose(): void {
-		this.subscription?.dispose();
+	private clearStatusItems(): void {
 		for (const item of this.statusItems.values()) item.dispose();
 		this.statusItems.clear();
+	}
+
+	dispose(): void {
+		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.clearStatusItems();
 	}
 }

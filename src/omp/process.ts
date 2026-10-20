@@ -1,11 +1,14 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { deferred } from "../shared/deferred";
 import type { Event, Logger } from "./api";
 import type { OmpTransport, TransportClose } from "./client";
 import { Emitter } from "./emitter";
 
 export interface OmpProcessOptions {
 	executable: string;
-	/** Arguments appended after `--mode rpc-ui`. */
+	/** The command OMP runs; `--mode rpc-ui` when absent. */
+	mode?: readonly string[];
+	/** Arguments appended after the mode. */
 	args: readonly string[];
 	cwd: string;
 	env?: NodeJS.ProcessEnv;
@@ -15,9 +18,12 @@ export interface OmpProcessOptions {
 const DEFAULT_GRACE_MS = 3000;
 /** How long to wait for stdio to drain after the process exits before reporting the close. */
 const STDIO_DRAIN_MS = 1000;
+/** Bounds of the stderr tail reported with the close. */
+const STDERR_TAIL_LINES = 20;
+const STDERR_TAIL_CHARS = 4000;
 
 /**
- * One `omp --mode rpc-ui` child process. On POSIX it leads its own process
+ * One OMP child process (`omp --mode rpc-ui` unless another mode is given). On POSIX it leads its own process
  * group so shutdown and exit cleanup reach every descendant; on Windows the
  * tree is killed with `taskkill /T /F`.
  */
@@ -26,24 +32,27 @@ export class OmpProcess implements OmpTransport {
 	readonly #logger: Logger;
 	readonly #data: Emitter<Uint8Array>;
 	readonly #close: Emitter<TransportClose>;
-	readonly #closed = Promise.withResolvers<TransportClose>();
+	readonly #closed = deferred<TransportClose>();
 	readonly onData: Event<Uint8Array>;
 	readonly onClose: Event<TransportClose>;
 	#exited = false;
 	#reported = false;
-	#stderrTail = "";
+	/** Stderr text after the last newline. */
+	#stderrPartial = "";
+	readonly #stderrLines: string[] = [];
 	#shutdown: Promise<void> | undefined;
 
 	constructor(options: OmpProcessOptions) {
 		this.#logger = options.logger;
 		const win = process.platform === "win32";
-		this.#child = spawn(options.executable, ["--mode", "rpc-ui", ...options.args], {
+		const [file, args, verbatim] = launchCommand(options.executable, [...(options.mode ?? ["--mode", "rpc-ui"]), ...options.args], win);
+		this.#child = spawn(file, args, {
 			cwd: options.cwd,
 			env: options.env ?? process.env,
 			stdio: ["pipe", "pipe", "pipe"],
 			detached: !win,
 			windowsHide: true,
-			shell: win && /\.(cmd|bat)$/i.test(options.executable),
+			windowsVerbatimArguments: verbatim,
 		});
 		const child = this.#child;
 		const onListenerError = (error: unknown) => this.#logger.error("OMP process listener failed", error);
@@ -54,16 +63,17 @@ export class OmpProcess implements OmpTransport {
 
 		child.stdout.on("data", (chunk: Buffer) => this.#data.fire(chunk));
 		child.stderr.on("data", (chunk: Buffer) => this.#stderr(chunk.toString("utf8")));
-		child.stdin.on("error", error => this.#logger.debug(`OMP stdin error: ${error.message}`));
-		child.stdout.on("error", error => this.#logger.warn(`OMP stdout error: ${error.message}`));
-		child.stderr.on("error", error => this.#logger.debug(`OMP stderr error: ${error.message}`));
+		// A failed write is reported to its writer through the write callback; this event repeats it.
+		child.stdin.on("error", error => this.#logger.debug("OMP stdin error", error));
+		child.stdout.on("error", error => this.#logger.warn("OMP stdout error", error));
+		child.stderr.on("error", error => this.#logger.debug("OMP stderr error", error));
 
 		child.on("error", error => {
 			if (child.pid === undefined) {
 				this.#exited = true;
 				this.#report({ code: null, signal: null, error });
 			} else {
-				this.#logger.warn(`OMP process error: ${error.message}`);
+				this.#logger.warn("OMP process error", error);
 			}
 		});
 		child.on("exit", (code, signal) => {
@@ -85,17 +95,22 @@ export class OmpProcess implements OmpTransport {
 		return this.#exited;
 	}
 
-	write(line: string): void {
+	write(line: string, onError?: (error: Error) => void): void {
 		const stdin = this.#child.stdin;
 		if (this.#exited || this.#shutdown || stdin.destroyed || !stdin.writable) {
 			throw new Error("OMP process is not running");
 		}
-		stdin.write(line);
+		stdin.write(line, error => {
+			if (!error) return;
+			if (onError) onError(error);
+			else this.#logger.warn("Failed to write to OMP stdin", error);
+		});
 	}
 
 	/**
 	 * Close stdin and keep reading stdout until OMP exits; after `graceMs`
-	 * send SIGTERM to the process tree, then SIGKILL. Idempotent.
+	 * send SIGTERM to the process group, then SIGKILL. Windows has no graceful
+	 * signal, so both steps end the tree with `taskkill /T /F`. Idempotent.
 	 */
 	shutdown(graceMs = DEFAULT_GRACE_MS): Promise<void> {
 		this.#shutdown ??= this.#runShutdown(graceMs);
@@ -104,15 +119,18 @@ export class OmpProcess implements OmpTransport {
 
 	async #runShutdown(graceMs: number): Promise<void> {
 		if (!this.#exited) {
+			const win = process.platform === "win32";
 			this.#child.stdin.end();
 			if (!(await this.#waitForExit(graceMs))) {
-				this.#logger.info(`OMP did not exit within ${graceMs} ms of closing stdin; sending SIGTERM`);
+				this.#logger.info(
+					`OMP did not exit within ${graceMs} ms of closing stdin; ${win ? "killing its process tree with taskkill /T /F" : "sending SIGTERM"}`,
+				);
 				this.#killTree("SIGTERM");
 				if (!(await this.#waitForExit(graceMs))) {
-					this.#logger.warn("OMP ignored SIGTERM; sending SIGKILL");
+					this.#logger.warn(win ? "OMP survived taskkill /T /F; running it again" : "OMP ignored SIGTERM; sending SIGKILL");
 					this.#killTree("SIGKILL");
 					if (!(await this.#waitForExit(graceMs))) {
-						throw new Error(`OMP process ${this.#child.pid} did not exit after SIGKILL`);
+						throw new Error(`OMP process ${this.#child.pid} did not exit after ${win ? "taskkill /T /F" : "SIGKILL"}`);
 					}
 				}
 			}
@@ -122,7 +140,7 @@ export class OmpProcess implements OmpTransport {
 
 	async #waitForExit(ms: number): Promise<boolean> {
 		if (this.#exited) return true;
-		const exited = Promise.withResolvers<boolean>();
+		const exited = deferred<boolean>();
 		const timer = setTimeout(() => exited.resolve(false), ms);
 		const onExit = () => exited.resolve(true);
 		this.#child.once("exit", onExit);
@@ -134,19 +152,7 @@ export class OmpProcess implements OmpTransport {
 
 	#killTree(signal: NodeJS.Signals): void {
 		const pid = this.#child.pid;
-		if (pid === undefined) return;
-		if (process.platform === "win32") {
-			const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-			killer.on("error", error => this.#logger.warn(`taskkill failed: ${error.message}`));
-			return;
-		}
-		try {
-			process.kill(-pid, signal);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-				this.#logger.warn(`Failed to send ${signal} to OMP process group ${pid}: ${(error as Error).message}`);
-			}
-		}
+		if (pid !== undefined) void killProcessTree(pid, signal, this.#logger);
 	}
 
 	/** Descendants that outlived OMP would be orphaned; the group dies with its leader. */
@@ -155,17 +161,82 @@ export class OmpProcess implements OmpTransport {
 	}
 
 	#stderr(text: string): void {
-		const lines = (this.#stderrTail + text).split(/\r?\n/);
-		this.#stderrTail = lines.pop() ?? "";
-		for (const line of lines) if (line.trim() !== "") this.#logger.debug(`omp: ${line}`);
+		const lines = (this.#stderrPartial + text).split(/\r?\n/);
+		this.#stderrPartial = lines.pop() ?? "";
+		for (const line of lines) this.#stderrLine(line);
+	}
+
+	#stderrLine(line: string): void {
+		if (line.trim() === "") return;
+		this.#logger.debug(`omp: ${line}`);
+		this.#stderrLines.push(line);
+		if (this.#stderrLines.length > STDERR_TAIL_LINES) this.#stderrLines.shift();
 	}
 
 	#report(close: TransportClose): void {
 		if (this.#reported) return;
 		this.#reported = true;
-		if (this.#stderrTail.trim() !== "") this.#logger.debug(`omp: ${this.#stderrTail}`);
-		this.#stderrTail = "";
-		this.#closed.resolve(close);
-		this.#close.fire(close);
+		this.#stderrLine(this.#stderrPartial);
+		this.#stderrPartial = "";
+		const pid = this.#child.pid;
+		const tail = this.#stderrLines.join("\n");
+		const stderr = tail.length > STDERR_TAIL_CHARS ? `…${tail.slice(tail.length - STDERR_TAIL_CHARS + 1)}` : tail;
+		const reported: TransportClose = { ...close, ...(pid === undefined ? {} : { pid }), ...(stderr === "" ? {} : { stderr }) };
+		this.#closed.resolve(reported);
+		this.#close.fire(reported);
 	}
+}
+
+/**
+ * Send `signal` to the process group led by `pid`; on Windows, where signals do
+ * not exist, end the whole tree with `taskkill /T /F`. Failures are logged.
+ * @returns Resolves once the signal is sent or taskkill has finished.
+ */
+export function killProcessTree(pid: number, signal: NodeJS.Signals, logger: Logger): Promise<void> {
+	if (process.platform === "win32") {
+		const done = deferred<void>();
+		const command = `taskkill /pid ${pid} /T /F`;
+		const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+		let stderr = "";
+		killer.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString("utf8");
+		});
+		killer.on("error", error => {
+			logger.warn(`${command} failed to start`, error);
+			done.resolve();
+		});
+		killer.on("close", code => {
+			if (code !== 0 && code !== null) logger.warn(`${command} exited with code ${code}: ${stderr.trim()}`);
+			done.resolve();
+		});
+		return done.promise;
+	}
+	try {
+		process.kill(-pid, signal);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+			logger.warn(`Failed to send ${signal} to OMP process group ${pid}`, error);
+		}
+	}
+	return Promise.resolve();
+}
+
+/** cmd.exe metacharacters; `^` makes the next one literal. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * Windows runs `.cmd`/`.bat` launchers (npm installs `omp.cmd`) only through
+ * cmd.exe, which re-parses the command line, so the path and every argument
+ * are quoted and caret-escaped. Arguments are escaped twice because the
+ * launcher re-parses them again when it expands `%*`.
+ */
+function launchCommand(executable: string, args: string[], win: boolean): [string, string[], boolean] {
+	if (!win || !/\.(cmd|bat)$/i.test(executable)) return [executable, args, false];
+	const line = [executable.replace(CMD_META, "^$1"), ...args.map(cmdArgument)].join(" ");
+	return [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `"${line}"`], true];
+}
+
+function cmdArgument(arg: string): string {
+	const quoted = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+	return quoted.replace(CMD_META, "^$1").replace(CMD_META, "^$1");
 }

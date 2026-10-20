@@ -13,6 +13,13 @@ export function supportsSecondarySidebar(version: string): boolean {
 	return major > 1 || (major === 1 && minor >= 106);
 }
 
+/** Context key naming the container that holds the OMP views; unset before activation, which keeps every OMP view hidden. */
+export const LAYOUT_CONTEXT = "omp.layout";
+
+export function layoutContextValue(secondary: boolean): string {
+	return secondary ? "secondarySidebar" : "activityBar";
+}
+
 /** Secondary Sidebar views, or their Activity Bar fallbacks on older VS Code. */
 export function chatViewIds(secondary: boolean): OmpViewIds {
 	return secondary

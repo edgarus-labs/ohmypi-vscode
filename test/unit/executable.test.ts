@@ -20,6 +20,24 @@ describe("resolveExecutable", () => {
 		);
 	});
 
+	it("rejects a relative configured path", () => {
+		assert.throws(
+			() => resolveExecutable("./tools/omp", env, "linux", fsWith("./tools/omp")),
+			(error: Error) => /omp\.executablePath/.test(error.message) && /absolute/.test(error.message) && error.message.includes("./tools/omp"),
+		);
+		assert.throws(
+			() => resolveExecutable("tools\\omp.cmd", { USERPROFILE: "C:\\Users\\u" }, "win32", fsWith("tools\\omp.cmd")),
+			/absolute/,
+		);
+	});
+
+	it("rejects a configured win32 path that Windows cannot launch", () => {
+		assert.throws(
+			() => resolveExecutable("C:\\tools\\omp", { USERPROFILE: "C:\\Users\\u" }, "win32", fsWith("C:\\tools\\omp")),
+			(error: Error) => /\.exe/.test(error.message) && /\.cmd/.test(error.message) && error.message.includes("C:\\tools\\omp"),
+		);
+	});
+
 	it("searches PATH in order when nothing is configured", () => {
 		assert.equal(resolveExecutable("", env, "linux", fsWith("/opt/omp/bin/omp")), "/opt/omp/bin/omp");
 		assert.equal(resolveExecutable(undefined, env, "linux", fsWith("/usr/bin/omp", "/opt/omp/bin/omp")), "/usr/bin/omp");
@@ -34,6 +52,11 @@ describe("resolveExecutable", () => {
 		const winEnv = { USERPROFILE: "C:\\Users\\u", Path: "C:\\bin;C:\\tools" };
 		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\tools\\omp.cmd")), "C:\\tools\\omp.cmd");
 		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\bin\\omp.exe")), "C:\\bin\\omp.exe");
+	});
+
+	it("skips an extensionless omp on win32 for a launcher Windows can run", () => {
+		const winEnv = { USERPROFILE: "C:\\Users\\u", Path: "C:\\bin;C:\\tools" };
+		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\bin\\omp", "C:\\tools\\omp.cmd")), "C:\\tools\\omp.cmd");
 	});
 
 	it("lists every location tried when nothing is found", () => {

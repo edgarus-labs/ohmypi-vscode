@@ -1,23 +1,21 @@
-import * as path from "node:path";
 import * as vscode from "vscode";
-import type { AgentView, Logger, ModelView, OmpServiceApi } from "../omp/api";
-import type { ChangeTracker, TrackedChange } from "../vscode/ChangeTracker";
+import type { AgentView, Logger, OmpServiceApi, SessionBinding } from "../omp/api";
+import { errorMessage } from "../shared/errors";
+import { relativeTime } from "../shared/format";
+import { effortChoices } from "../shared/session";
+import type { TrackedChange } from "../vscode/changeModel";
+import type { ChangeTracker } from "../vscode/ChangeTracker";
 import type { VirtualDocuments } from "../vscode/VirtualDocuments";
-import { effortChoices } from "../webview/chrome";
 import type { AgentTreeProvider } from "./AgentTreeProvider";
 import type { ChatView } from "./ChatView";
+import { agentSummaryMarkdown, formatBytes, sessionTitle, transcriptToMarkdown } from "./format";
 import type { OmpViewIds } from "./layout";
-import { agentSummaryMarkdown, formatBytes, formatModelDetail, relativeTime, transcriptToMarkdown } from "./format";
-import { errorMessage } from "./guards";
-
-export interface StartOptions {
-	resumeSessionFile?: string;
-	newSession?: boolean;
-}
+import { pickModel } from "./modelPicker";
+import type { ModelPreferences } from "./modelPreferences";
 
 export interface CommandDeps {
 	/** Running service; starts OMP with `options` when it is not running yet. */
-	ensureService(options?: StartOptions): Promise<OmpServiceApi>;
+	ensureService(options?: SessionBinding): Promise<OmpServiceApi>;
 	/** True when OMP has not been started (manual startup or after a failure). */
 	needsStart(): boolean;
 	currentService(): OmpServiceApi | undefined;
@@ -29,6 +27,8 @@ export interface CommandDeps {
 	docs: VirtualDocuments;
 	output: vscode.OutputChannel;
 	logger: Logger;
+	/** Favorite and recent models and the model picker's filters. */
+	modelPreferences: ModelPreferences;
 }
 
 const SETTINGS_QUERY = "@ext:oh-my-pi.oh-my-pi";
@@ -44,35 +44,6 @@ async function pickAgent(deps: CommandDeps, agent: AgentView | undefined, placeH
 		{ placeHolder },
 	);
 	return pick?.agent;
-}
-
-async function selectModel(deps: CommandDeps): Promise<void> {
-	const service = await deps.ensureService();
-	const models = await service.listModels();
-	if (models.length === 0) {
-		void vscode.window.showWarningMessage("OMP reports no available models. Configure providers in OMP.");
-		return;
-	}
-	const current = service.session.model;
-	type ModelItem = vscode.QuickPickItem & { model?: ModelView };
-	const items: ModelItem[] = [];
-	const sorted = [...models].sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
-	let provider: string | undefined;
-	for (const model of sorted) {
-		if (model.provider !== provider) {
-			provider = model.provider;
-			items.push({ label: provider, kind: vscode.QuickPickItemKind.Separator });
-		}
-		const isCurrent = current?.provider === model.provider && current.id === model.id;
-		items.push({
-			label: `${isCurrent ? "$(check) " : ""}${model.name}`,
-			description: isCurrent ? `${model.id} (current)` : model.id,
-			detail: formatModelDetail(model),
-			model,
-		});
-	}
-	const pick = await vscode.window.showQuickPick(items, { placeHolder: "Select model", matchOnDescription: true, matchOnDetail: true });
-	if (pick?.model) await service.setModel(pick.model.provider, pick.model.id);
 }
 
 async function selectThinkingLevel(deps: CommandDeps): Promise<void> {
@@ -106,7 +77,7 @@ async function resumeSession(deps: CommandDeps): Promise<void> {
 	const pick = await vscode.window.showQuickPick(
 		sessions.map(session => {
 			const isCurrent = session.path === currentFile;
-			const title = session.title || session.firstMessage?.replace(/\s+/g, " ").slice(0, 100) || path.basename(session.path);
+			const title = sessionTitle(session);
 			return {
 				label: `${isCurrent ? "$(check) " : ""}${title}`,
 				description: `${relativeTime(session.modified, now)} · ${formatBytes(session.size)}${isCurrent ? " · current" : ""}`,
@@ -145,11 +116,6 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			deps.changes.clear();
 		}),
 		register("omp.resumeSession", () => resumeSession(deps)),
-		register("omp.switchSession", async (sessionFile?: string) => {
-			if (typeof sessionFile !== "string") return resumeSession(deps);
-			const service = await deps.ensureService();
-			if (sessionFile !== service.session.sessionFile) await service.switchSession(sessionFile);
-		}),
 		register("omp.openConversation", () => deps.chat.reveal()),
 		register("omp.toggleFastMode", async () => {
 			const service = await deps.ensureService();
@@ -176,9 +142,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true });
 			await vscode.commands.executeCommand("workbench.action.files.setActiveEditorReadonlyInSession");
 		}),
-		register("omp.selectModel", () => selectModel(deps)),
+		register("omp.selectModel", async () => pickModel(await deps.ensureService(), deps.modelPreferences)),
 		register("omp.selectThinkingLevel", () => selectThinkingLevel(deps)),
 		register("omp.sendPrompt", () => sendPrompt(deps)),
+		register("omp.showUsage", async () => {
+			await deps.chat.reveal();
+			deps.chat.toggleUsage();
+		}),
 		register("omp.abort", async () => deps.currentService()?.abort()),
 		register("omp.restart", () => deps.restart()),
 		register("omp.openSettings", openOmpSettings),

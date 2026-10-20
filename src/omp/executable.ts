@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { expandHome } from "./paths";
 
 export interface ExecutableFs {
 	isExecutableFile(candidate: string): boolean;
@@ -18,10 +19,14 @@ const nodeFs: ExecutableFs = {
 	},
 };
 
+/** What Windows can spawn: executables directly, `.cmd`/`.bat` launchers through cmd.exe. */
+const WINDOWS_LAUNCHABLE = /\.(exe|com|cmd|bat)$/i;
+
 /**
- * Locate the `omp` executable. A configured path must exist; otherwise PATH is
- * searched, then `~/.local/bin` and `~/.bun/bin`.
- * @throws Error naming every location that was tried.
+ * Locate the `omp` executable. A configured path must be absolute (after `~`
+ * expansion) and exist; on Windows it must also end in `.exe`, `.com`, `.cmd`
+ * or `.bat`. Otherwise PATH is searched, then `~/.local/bin` and `~/.bun/bin`.
+ * @throws Error naming the rejected configured path or every location that was tried.
  */
 export function resolveExecutable(
 	configured: string | undefined,
@@ -35,17 +40,20 @@ export function resolveExecutable(
 	const trimmed = configured?.trim();
 
 	if (trimmed) {
-		const expanded =
-			trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\")
-				? pathApi.join(home, trimmed.slice(1))
-				: trimmed;
+		const expanded = expandHome(trimmed, home, pathApi);
+		if (!pathApi.isAbsolute(expanded)) {
+			throw new Error(`omp.executablePath must be an absolute path or start with ~, but is relative: ${expanded}`);
+		}
+		if (win && !WINDOWS_LAUNCHABLE.test(expanded)) {
+			throw new Error(`omp.executablePath must name a .exe, .com, .cmd or .bat file on Windows: ${expanded}`);
+		}
 		if (fileSystem.isExecutableFile(expanded)) return expanded;
 		throw new Error(
 			`The omp executable configured in omp.executablePath was not found or is not executable: ${expanded}`,
 		);
 	}
 
-	const names = win ? ["omp.exe", "omp.cmd", "omp"] : ["omp"];
+	const names = win ? ["omp.exe", "omp.cmd"] : ["omp"];
 	const pathValue = win ? (env.Path ?? env.PATH ?? env.path) : env.PATH;
 	const dirs = (pathValue ?? "").split(win ? ";" : ":").filter(dir => dir.length > 0);
 	dirs.push(pathApi.join(home, ".local", "bin"), pathApi.join(home, ".bun", "bin"));

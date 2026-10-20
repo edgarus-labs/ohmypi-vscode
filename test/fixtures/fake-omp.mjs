@@ -1,8 +1,18 @@
 #!/usr/bin/env node
 // Scripted stand-in for `omp --mode rpc-ui` speaking the OMP RPC wire protocol.
 // Prompt scenarios are chosen by keywords in the prompt text:
-//   crash, slow, approve, ask, subagent, background, `tool <absolute path>`; anything else streams a reply.
+//   crash (exit 3 mid-turn), slow (streams until aborted), approve (confirm), input, editor,
+//   ask (ask dialog, or select when ask dialogs are off), subagent, background (settles later),
+//   present (notify/setStatus/open_url/set_editor_text requests, notice/compaction/retry events,
+//   session_info_update, config_update, tool_stream_update), `tool <absolute path>` (read + edit),
+//   `racyedit <absolute path>` (edits before the start event); anything else streams an echo.
+// Slash commands: COMMANDS is sent in `available_commands_update` right after `ready` and answers
+//   `get_available_commands` (builtins with aliases/hint/subcommands, one `skill:` command).
+// Flags: --no-session (no session file).
 // Env: FAKE_OMP_SESSION_DIR (session files), FAKE_OMP_LOG (every stdin line is appended),
+//      FAKE_OMP_THINKING=auto (start with the auto effort selector),
+//      FAKE_OMP_NO_ASK_DIALOG=1 (set_ask_dialog fails), FAKE_OMP_CANCEL_SWITCH=1 (switch_session is vetoed),
+//      FAKE_OMP_EXIT_IF_EXISTS=<file> (exit 4 before `ready` while that file exists),
 //      FAKE_OMP_IGNORE_EOF=1, FAKE_OMP_IGNORE_SIGTERM=1, FAKE_OMP_SPAWN_CHILD=1 (shutdown tests).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -44,6 +54,29 @@ const MODELS = [
 	},
 ];
 
+const COMMANDS = [
+	{ name: "help", description: "Show available commands", source: "builtin" },
+	{ name: "model", aliases: ["models"], description: "Select a model", source: "builtin" },
+	{
+		name: "effort",
+		description: "Set the reasoning effort",
+		input: { hint: "[level]" },
+		subcommands: ["off", "low", "medium", "high", "auto"].map(name => ({ name, description: `Use ${name} effort` })),
+		source: "builtin",
+	},
+	{
+		name: "mcp",
+		description: "Manage MCP servers",
+		input: { hint: "<subcommand>" },
+		subcommands: [
+			{ name: "list", description: "List servers", usage: "/mcp list" },
+			{ name: "add", description: "Add a server", usage: "/mcp add <name>" },
+		],
+		source: "builtin",
+	},
+	{ name: "skill:codebase-review", description: "Full repository codebase review", source: "skill" },
+];
+
 const state = {
 	protocolVersion: 1,
 	model: MODELS[0],
@@ -62,6 +95,8 @@ const state = {
 	queue: [],
 	subagents: new Map(),
 	pendingUi: new Map(),
+	hostTools: [],
+	pendingHostTools: new Map(),
 };
 let counter = 0;
 const nextId = prefix => `${prefix}-${++counter}`;
@@ -198,6 +233,20 @@ function waitForUi(request) {
 	return new Promise(resolve => state.pendingUi.set(request.id, resolve));
 }
 
+/** `hosttool <name> <json arguments>` calls a host tool the client registered and replies with its answer. */
+async function scenarioHostTool(text, run) {
+	const match = /hosttool\s+(\S+)\s*(.*)$/s.exec(text);
+	if (!match) return streamAssistant("No host tool given.", run);
+	const [, toolName, rawArgs] = match;
+	if (!state.hostTools.includes(toolName)) return streamAssistant(`Host tool not registered: ${toolName}`, run);
+	const id = nextId("host");
+	const answer = new Promise(resolve => state.pendingHostTools.set(id, resolve));
+	send({ type: "host_tool_call", id, toolCallId: nextId("call"), toolName, arguments: rawArgs ? JSON.parse(rawArgs) : {} });
+	const result = await answer;
+	const output = result.result?.content?.map(part => part.text ?? "").join("") ?? "";
+	await streamAssistant(`Host tool ${result.isError ? "error" : "ok"}: ${output}`, run);
+}
+
 /** `executeFirst` changes the file before the start event, as when a host receives events late. */
 async function runTool(run, name, args, execute, { executeFirst = false } = {}) {
 	const toolCallId = nextId("call");
@@ -303,6 +352,28 @@ async function scenarioSubagent(run) {
 	return streamAssistant("Both subagents completed.", run);
 }
 
+async function scenarioPresent(run) {
+	send({ type: "extension_ui_request", id: nextId("ui"), method: "notify", message: "Heads up", notifyType: "warning" });
+	send({ type: "extension_ui_request", id: nextId("ui"), method: "setStatus", statusKey: "fake", statusText: "busy" });
+	send({ type: "extension_ui_request", id: nextId("ui"), method: "setStatus", statusKey: "fake" });
+	send({ type: "extension_ui_request", id: nextId("ui"), method: "open_url", url: "https://fake.invalid/login", launchUrl: "https://fake.invalid/launch", instructions: "Sign in" });
+	send({ type: "extension_ui_request", id: nextId("ui"), method: "set_editor_text", text: "draft text" });
+	send({ type: "notice", level: "info", message: "Fake notice", source: "fake" });
+	send({ type: "auto_compaction_start", reason: "threshold", action: "compact" });
+	send({ type: "auto_compaction_end", action: "compact", aborted: false, willRetry: false, errorMessage: "too small" });
+	send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "overloaded" });
+	send({ type: "auto_retry_end", success: false, attempt: 3, finalError: "still overloaded" });
+	state.sessionName = "Presented";
+	send({ type: "session_info_update", sessionId: state.sessionId, title: state.sessionName });
+	send({ type: "config_update", thinkingLevel: state.thinkingLevel });
+	const toolCallId = nextId("call");
+	send({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } });
+	send({ type: "tool_stream_update", toolCallId, toolName: "bash", update: { content: [{ type: "text", text: "streamed line" }] } });
+	await sleep(5);
+	send({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "a\nb" }] }, isError: false });
+	return streamAssistant("Presented.", run);
+}
+
 async function scenarioSlow(run) {
 	const messageId = nextId("msg");
 	send({ type: "message_start", messageId, message: assistantMessage([]) });
@@ -344,9 +415,13 @@ async function runPrompt(id, text) {
 		const decision = answer.cancelled ? "Cancelled" : answer.confirmed ? "Approved" : "Denied";
 		await streamAssistant(`Decision: ${decision}`, run);
 	} else if (/\binput\b/.test(text)) {
-		const secret = /\bsecret\b/.test(text);
-		const answer = await waitForUi({ id: nextId("ui"), method: "input", title: "Token", placeholder: "paste here", ...(secret ? { secret: true } : {}), timeout: 60000 });
-		await streamAssistant(secret ? `Received ${answer.value?.length ?? 0} characters` : `Input: ${answer.value ?? "cancelled"}`, run);
+		const answer = await waitForUi({ id: nextId("ui"), method: "input", title: "Token", placeholder: "paste here", timeout: 60000 });
+		await streamAssistant(`Received ${answer.value?.length ?? 0} characters`, run);
+	} else if (/\beditor\b/.test(text)) {
+		const answer = await waitForUi({ id: nextId("ui"), method: "editor", title: "Edit the plan", prefill: "step 1" });
+		await streamAssistant(`Edited: ${answer.value ?? "cancelled"}`, run);
+	} else if (/\bpresent\b/.test(text)) {
+		await scenarioPresent(run);
 	} else if (/\bask\b/.test(text)) {
 		if (state.askDialog) {
 			const answer = await waitForUi({
@@ -365,6 +440,8 @@ async function runPrompt(id, text) {
 		}
 	} else if (/\bsubagent\b/.test(text)) {
 		await scenarioSubagent(run);
+	} else if (/\bhosttool\b/.test(text)) {
+		await scenarioHostTool(text, run);
 	} else if (/\bracyedit\b/.test(text)) {
 		await scenarioRacyEdit(text, run);
 	} else if (/\btool\b/.test(text)) {
@@ -407,6 +484,15 @@ function handle(frame) {
 			resolve?.(frame);
 			return;
 		}
+		case "host_tool_result": {
+			const resolve = state.pendingHostTools.get(id);
+			state.pendingHostTools.delete(id);
+			resolve?.(frame);
+			return;
+		}
+		case "set_host_tools":
+			state.hostTools = (frame.tools ?? []).map(tool => tool.name);
+			return respond(type, id, { tools: state.hostTools });
 		case "negotiate_protocol":
 			state.protocolVersion = frame.protocolVersion;
 			return respond(type, id, { protocolVersion: frame.protocolVersion });
@@ -416,6 +502,8 @@ function handle(frame) {
 			return respond(type, id, { models: MODELS });
 		case "get_available_thinking_levels":
 			return respond(type, id, { levels: ["off", ...(state.model.thinking?.efforts ?? [])] });
+		case "get_available_commands":
+			return respond(type, id, { commands: COMMANDS });
 		case "set_model": {
 			const model = MODELS.find(m => m.provider === frame.provider && m.id === frame.modelId);
 			if (!model) return fail(type, id, `Model not found: ${frame.provider}/${frame.modelId}`);
@@ -447,6 +535,7 @@ function handle(frame) {
 			state.subscription = frame.level;
 			return respond(type, id, { level: frame.level });
 		case "set_ask_dialog":
+			if (env.FAKE_OMP_NO_ASK_DIALOG === "1") return fail(type, id, "Ask dialogs are not supported", "unsupported");
 			state.askDialog = frame.enabled;
 			return respond(type, id, { enabled: frame.enabled });
 		case "set_event_filter":
@@ -456,6 +545,7 @@ function handle(frame) {
 			newSession();
 			return respond(type, id, { cancelled: false });
 		case "switch_session":
+			if (env.FAKE_OMP_CANCEL_SWITCH === "1") return respond(type, id, { cancelled: true });
 			try {
 				loadSession(frame.sessionPath);
 			} catch (error) {
@@ -524,11 +614,15 @@ if (env.FAKE_OMP_SPAWN_CHILD === "1") {
 	process.stderr.write(`fake-omp child pid ${child.pid}\n`);
 }
 
+if (env.FAKE_OMP_EXIT_IF_EXISTS && fs.existsSync(env.FAKE_OMP_EXIT_IF_EXISTS)) {
+	process.stderr.write("fake-omp refusing to start\n");
+	process.exit(4);
+}
 newSession();
-process.stderr.write(`fake-omp started pid ${process.pid} args ${process.argv.slice(2).join(" ")}\n`);
+process.stderr.write(`fake-omp started pid ${process.pid} args ${JSON.stringify(process.argv.slice(2))}\n`);
 send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
 send({ type: "extension_ui_request", id: nextId("ui"), method: "setWidget", widgetKey: "fake", widgetLines: ["fake widget"] });
-send({ type: "available_commands_update", commands: [{ name: "help", source: "builtin" }] });
+send({ type: "available_commands_update", commands: COMMANDS });
 send({ type: "fake_future_frame", note: "unknown frame types must be tolerated" });
 
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });

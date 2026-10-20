@@ -1,49 +1,17 @@
-import type { AgentView, ModelView, TranscriptItem } from "../omp/api";
+import * as path from "node:path";
+import type { AgentView, SessionSummary, TranscriptItem } from "../omp/api";
+import { fenceFor, formatCost, formatDuration, turnSummaryText } from "../shared/format";
 
-export function relativeTime(timestamp: number, now: number): string {
-	const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
-	if (seconds < 60) return "just now";
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m ago`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h ago`;
-	return `${Math.floor(hours / 24)}d ago`;
+/** Display title of a saved session: its title, else its first message, else its file name; whitespace collapsed. */
+export function sessionTitle(session: Pick<SessionSummary, "title" | "firstMessage" | "path">): string {
+	const [title, firstMessage] = [session.title, session.firstMessage].map(text => text?.replace(/\s+/g, " ").trim());
+	return title || firstMessage || path.basename(session.path, ".jsonl");
 }
 
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function formatDuration(ms: number): string {
-	if (ms < 1000) return `${Math.round(ms)}ms`;
-	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-	const total = Math.round(ms / 1000);
-	return `${Math.floor(total / 60)}m ${total % 60}s`;
-}
-
-export function compactTokens(value: number): string {
-	if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(1)}M`;
-	if (value >= 1000) return `${+(value / 1000).toFixed(1)}k`;
-	return String(value);
-}
-
-export function formatModelDetail(model: ModelView): string {
-	const parts: string[] = [];
-	if (model.contextWindow) parts.push(`ctx ${compactTokens(model.contextWindow)}`);
-	if (model.maxTokens) parts.push(`out ${compactTokens(model.maxTokens)}`);
-	if (model.thinkingEfforts.length > 0) parts.push(`reasoning: ${model.thinkingEfforts.join(", ")}`);
-	else if (model.reasoning) parts.push("reasoning");
-	if (model.input.length > 0) parts.push(`in: ${model.input.join(", ")}`);
-	if (model.cost && (model.cost.input > 0 || model.cost.output > 0)) {
-		parts.push(`$${+model.cost.input.toFixed(4)}/$${+model.cost.output.toFixed(4)} per Mtok`);
-	}
-	return parts.join(" · ");
-}
-
-export function formatCost(usd: number): string {
-	return `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`;
 }
 
 export function agentSummaryMarkdown(agent: AgentView, now: number): string {
@@ -66,12 +34,6 @@ export function agentSummaryMarkdown(agent: AgentView, now: number): string {
 		if (value) lines.push(`| ${field} | ${value.replace(/\|/g, "\\|").replace(/\n/g, " ")} |`);
 	}
 	return `${lines.join("\n")}\n`;
-}
-
-/** Markdown fence longer than any backtick run inside `text`. */
-export function fenceFor(text: string): string {
-	const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(match => match[0].length));
-	return "`".repeat(Math.max(3, longest + 1));
 }
 
 function fenced(text: string): string {
@@ -106,6 +68,9 @@ export function transcriptToMarkdown(title: string, items: readonly TranscriptIt
 				break;
 			case "command_output":
 				blocks.push(fenced(item.text));
+				break;
+			case "turn_summary":
+				blocks.push(`_${turnSummaryText(item)}_`);
 				break;
 		}
 	}

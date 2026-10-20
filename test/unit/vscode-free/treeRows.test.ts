@@ -1,6 +1,8 @@
 import * as assert from "node:assert/strict";
+import * as path from "node:path";
 import type { AgentView } from "../../../src/omp/api";
-import { agentRowDescription, agentRowLabel, agentsSummary, changeRowDescription, changesSummary, sortAgents } from "../../../src/ui/treeRows";
+import { agentRowDescription, agentRowLabel, agentsSummary, sortAgents } from "../../../src/ui/treeRows";
+import { changeRowDescription, changesSummary } from "../../../src/vscode/changeRows";
 
 function agent(overrides: Partial<AgentView>): AgentView {
 	return { id: "a", name: "task", status: "completed", ...overrides };
@@ -46,7 +48,7 @@ describe("agent and change summaries", () => {
 		assert.equal(changesSummary(0), "");
 		assert.equal(changesSummary(1), "1 file");
 		assert.equal(changesSummary(3), "3 files");
-		assert.equal(changeRowDescription({ path: "/w/src/auth/A.cs", status: "M", added: 3, removed: 1 }, "/w"), "M · src/auth · +3 −1");
+		assert.equal(changeRowDescription({ path: "/w/src/auth/A.cs", status: "M", added: 3, removed: 1 }, "/w"), `M · ${path.join("src", "auth")} · +3 −1`);
 		assert.equal(changeRowDescription({ path: "/w/A.cs", status: "A", added: 4, removed: 0 }, "/w"), "A · +4 −0");
 		assert.equal(changeRowDescription({ path: "/w/old.cs", status: "D", added: 0, removed: 9 }, "/w"), "D");
 		assert.equal(changeRowDescription({ path: "/x/y/B.cs", status: "M", added: 1, removed: 1 }, undefined), "M · /x/y · +1 −1");

@@ -1,11 +1,13 @@
 import type { Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { SessionSummary } from "./api";
-import { isRecord } from "./protocol";
+import { isRecord } from "../shared/guards";
+import type { Logger, SessionSummary } from "./api";
 
 const HEAD_BYTES = 64 * 1024;
 const FIRST_MESSAGE_CHARS = 200;
+/** Session files read at the same time, so large session directories stay within file-descriptor limits. */
+const READ_CONCURRENCY = 16;
 
 function userText(content: unknown): string | undefined {
 	if (typeof content === "string") return content;
@@ -19,18 +21,19 @@ function userText(content: unknown): string | undefined {
 async function readSummary(file: string): Promise<SessionSummary | undefined> {
 	const handle = await fs.open(file, "r");
 	let head: string;
+	let bytesRead: number;
 	let stat: Stats;
 	try {
 		stat = await handle.stat();
 		if (!stat.isFile()) return undefined;
 		const buffer = Buffer.alloc(Math.min(HEAD_BYTES, stat.size));
-		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+		({ bytesRead } = await handle.read(buffer, 0, buffer.length, 0));
 		head = buffer.subarray(0, bytesRead).toString("utf8");
 	} finally {
 		await handle.close();
 	}
 
-	const complete = head.length === stat.size ? head : head.slice(0, head.lastIndexOf("\n") + 1);
+	const complete = bytesRead === stat.size ? head : head.slice(0, head.lastIndexOf("\n") + 1);
 	const summary: SessionSummary = { path: file, modified: stat.mtimeMs, size: stat.size };
 	let hasHeader = false;
 	for (const line of complete.split("\n")) {
@@ -59,9 +62,12 @@ async function readSummary(file: string): Promise<SessionSummary | undefined> {
 
 /**
  * Summaries of the OMP session files (`*.jsonl`) in `dir`, newest first. Only
- * the first 64 KiB of each file is read; files without a session header are skipped.
+ * the first 64 KiB of each file is read; files without a session header are
+ * skipped, and so are entries that cannot be read: a directory or a file that
+ * vanished silently, any other failure with a warning. Only a directory that
+ * cannot be listed fails the call.
  */
-export async function listSessions(dir: string): Promise<SessionSummary[]> {
+export async function listSessions(dir: string, logger: Logger, read = readSummary): Promise<SessionSummary[]> {
 	let names: string[];
 	try {
 		names = await fs.readdir(dir);
@@ -69,17 +75,21 @@ export async function listSessions(dir: string): Promise<SessionSummary[]> {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
-	const summaries = await Promise.all(
-		names
-			.filter(name => name.endsWith(".jsonl"))
-			.map(name =>
-				readSummary(path.join(dir, name)).catch((error: NodeJS.ErrnoException) => {
-					if (error.code === "ENOENT" || error.code === "EISDIR" || error.code === "EACCES") return undefined;
-					throw error;
-				}),
-			),
-	);
-	return summaries
-		.filter((summary): summary is SessionSummary => summary !== undefined)
-		.sort((a, b) => b.modified - a.modified);
+	const files = names.filter(name => name.endsWith(".jsonl")).map(name => path.join(dir, name));
+	const summaries: SessionSummary[] = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < files.length) {
+			const file = files[next++];
+			try {
+				const summary = await read(file);
+				if (summary) summaries.push(summary);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code !== "ENOENT" && code !== "EISDIR") logger.warn(`Skipped unreadable session file ${file}`, error);
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, files.length) }, worker));
+	return summaries.sort((a, b) => b.modified - a.modified);
 }

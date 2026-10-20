@@ -2,12 +2,13 @@
   "name": "oh-my-pi",
   "displayName": "oh-my-pi",
   "description": "Native VS Code client for the oh-my-pi (OMP) coding agent runtime",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "oh-my-pi",
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.95.0",
+    "node": ">=22.12"
   },
   "categories": [
     "AI",
@@ -17,99 +18,332 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "OMP runs commands and edits files in the workspace, so it does not start in Restricted Mode. Trust the workspace to use OMP.",
+      "restrictedConfigurations": [
+        "omp.executablePath",
+        "omp.extraArgs"
+      ]
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "secondarySidebar": [
         {
           "id": "omp-panel",
           "title": "OMP",
-          "icon": "media/omp.svg",
-          "when": "!omp.noSecondarySidebar"
+          "icon": "media/omp.svg"
         }
       ],
       "activitybar": [
         {
           "id": "omp",
           "title": "OMP",
-          "icon": "media/omp.svg",
-          "when": "omp.noSecondarySidebar"
+          "icon": "media/omp.svg"
         }
       ]
     },
     "views": {
       "omp-panel": [
-        { "type": "webview", "id": "omp.chat", "name": "Chat", "when": "!omp.noSecondarySidebar" },
-        { "id": "omp.agents", "name": "Agents", "visibility": "collapsed", "when": "!omp.noSecondarySidebar" },
-        { "id": "omp.changes", "name": "Changes", "visibility": "collapsed", "when": "!omp.noSecondarySidebar" }
+        {
+          "type": "webview",
+          "id": "omp.chat",
+          "name": "Chat",
+          "when": "omp.layout == secondarySidebar"
+        },
+        {
+          "id": "omp.agents",
+          "name": "Agents",
+          "visibility": "collapsed",
+          "when": "omp.layout == secondarySidebar"
+        },
+        {
+          "id": "omp.changes",
+          "name": "Changes",
+          "visibility": "collapsed",
+          "when": "omp.layout == secondarySidebar"
+        }
       ],
       "omp": [
-        { "type": "webview", "id": "omp.chatSidebar", "name": "Chat", "when": "omp.noSecondarySidebar" },
-        { "id": "omp.agentsSidebar", "name": "Agents", "visibility": "collapsed", "when": "omp.noSecondarySidebar" },
-        { "id": "omp.changesSidebar", "name": "Changes", "visibility": "collapsed", "when": "omp.noSecondarySidebar" }
+        {
+          "type": "webview",
+          "id": "omp.chatSidebar",
+          "name": "Chat",
+          "when": "omp.layout == activityBar"
+        },
+        {
+          "id": "omp.agentsSidebar",
+          "name": "Agents",
+          "visibility": "collapsed",
+          "when": "omp.layout == activityBar"
+        },
+        {
+          "id": "omp.changesSidebar",
+          "name": "Changes",
+          "visibility": "collapsed",
+          "when": "omp.layout == activityBar"
+        }
       ]
     },
     "commands": [
-      { "command": "omp.openConversation", "title": "Open in Side Bar", "category": "OMP", "icon": "$(comment-discussion)" },
-      { "command": "omp.addFileToChat", "title": "Add File to OMP Chat", "category": "OMP", "icon": "$(add)" },
-      { "command": "omp.newSession", "title": "New Session", "category": "OMP", "icon": "$(add)" },
-      { "command": "omp.resumeSession", "title": "Session History", "category": "OMP", "icon": "$(history)" },
-      { "command": "omp.switchSession", "title": "Switch Session", "category": "OMP" },
-      { "command": "omp.renameSession", "title": "Rename Session", "category": "OMP" },
-      { "command": "omp.selectModel", "title": "Select Model", "category": "OMP" },
-      { "command": "omp.selectThinkingLevel", "title": "Select Thinking Level", "category": "OMP" },
-      { "command": "omp.toggleFastMode", "title": "Toggle Fast Mode", "category": "OMP", "icon": "$(zap)" },
-      { "command": "omp.sendPrompt", "title": "Send Prompt", "category": "OMP" },
-      { "command": "omp.abort", "title": "Abort", "category": "OMP", "icon": "$(debug-stop)" },
-      { "command": "omp.restart", "title": "Restart", "category": "OMP", "icon": "$(debug-restart)" },
-      { "command": "omp.openSession", "title": "Open Session", "category": "OMP" },
-      { "command": "omp.openSettings", "title": "Open Settings", "category": "OMP", "icon": "$(gear)" },
-      { "command": "omp.showAgents", "title": "Show Agents", "category": "OMP" },
-      { "command": "omp.showLog", "title": "Show Log", "category": "OMP" },
-      { "command": "omp.agent.inspect", "title": "Inspect Agent", "category": "OMP", "icon": "$(info)" },
-      { "command": "omp.agent.openTranscript", "title": "Open Agent Transcript", "category": "OMP", "icon": "$(go-to-file)" },
-      { "command": "omp.agent.steer", "title": "Steer Agent", "category": "OMP", "icon": "$(comment)" },
-      { "command": "omp.agent.cancel", "title": "Cancel Agent", "category": "OMP", "icon": "$(close)" },
-      { "command": "omp.changes.openDiff", "title": "Open Diff", "category": "OMP", "icon": "$(diff)" },
-      { "command": "omp.changes.openFile", "title": "Open File", "category": "OMP", "icon": "$(go-to-file)" },
-      { "command": "omp.changes.clear", "title": "Clear Changes", "category": "OMP", "icon": "$(clear-all)" }
+      {
+        "command": "omp.openConversation",
+        "title": "Open in Side Bar",
+        "category": "OMP",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "omp.addFileToChat",
+        "title": "Add File to OMP Chat",
+        "category": "OMP",
+        "icon": "$(add)"
+      },
+      {
+        "command": "omp.newSession",
+        "title": "New Session",
+        "category": "OMP",
+        "icon": "$(add)"
+      },
+      {
+        "command": "omp.resumeSession",
+        "title": "Session History",
+        "category": "OMP",
+        "icon": "$(history)"
+      },
+      {
+        "command": "omp.renameSession",
+        "title": "Rename Session",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.selectModel",
+        "title": "Select Model",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.selectThinkingLevel",
+        "title": "Select Thinking Level",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.toggleFastMode",
+        "title": "Toggle Fast Mode",
+        "category": "OMP",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "omp.sendPrompt",
+        "title": "Send Prompt",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.showUsage",
+        "title": "Show Usage",
+        "category": "OMP",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "omp.abort",
+        "title": "Abort",
+        "category": "OMP",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "omp.restart",
+        "title": "Restart",
+        "category": "OMP",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "omp.openSession",
+        "title": "Open Session",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.openSettings",
+        "title": "Open Settings",
+        "category": "OMP",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "omp.showAgents",
+        "title": "Show Agents",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.showLog",
+        "title": "Show Log",
+        "category": "OMP"
+      },
+      {
+        "command": "omp.agent.inspect",
+        "title": "Inspect Agent",
+        "category": "OMP",
+        "icon": "$(info)"
+      },
+      {
+        "command": "omp.agent.openTranscript",
+        "title": "Open Agent Transcript",
+        "category": "OMP",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "omp.agent.steer",
+        "title": "Steer Agent",
+        "category": "OMP",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "omp.agent.cancel",
+        "title": "Cancel Agent",
+        "category": "OMP",
+        "icon": "$(close)"
+      },
+      {
+        "command": "omp.changes.openDiff",
+        "title": "Open Diff",
+        "category": "OMP",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "omp.changes.openFile",
+        "title": "Open File",
+        "category": "OMP",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "omp.changes.clear",
+        "title": "Clear Changes",
+        "category": "OMP",
+        "icon": "$(clear-all)"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "omp.newSession", "when": "view =~ /^omp\\.chat/", "group": "navigation@1" },
-        { "command": "omp.resumeSession", "when": "view =~ /^omp\\.chat/", "group": "navigation@2" },
-        { "command": "omp.abort", "when": "view =~ /^omp\\.chat/ && omp.busy", "group": "navigation@3" },
-        { "command": "omp.renameSession", "when": "view =~ /^omp\\.chat/", "group": "1_session@1" },
-        { "command": "omp.openSession", "when": "view =~ /^omp\\.chat/", "group": "1_session@2" },
-        { "command": "omp.restart", "when": "view =~ /^omp\\.chat/", "group": "1_session@3" },
-        { "command": "omp.showLog", "when": "view =~ /^omp\\.chat/", "group": "2_settings@1" },
-        { "command": "omp.openSettings", "when": "view =~ /^omp\\.chat/", "group": "2_settings@2" },
-        { "command": "omp.changes.clear", "when": "view =~ /^omp\\.changes/", "group": "navigation" }
+        {
+          "command": "omp.newSession",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omp.resumeSession",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omp.abort",
+          "when": "view =~ /^omp\\.chat/ && omp.busy",
+          "group": "navigation@3"
+        },
+        {
+          "command": "omp.renameSession",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "1_session@1"
+        },
+        {
+          "command": "omp.openSession",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "1_session@2"
+        },
+        {
+          "command": "omp.restart",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "1_session@3"
+        },
+        {
+          "command": "omp.showLog",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "2_settings@1"
+        },
+        {
+          "command": "omp.openSettings",
+          "when": "view =~ /^omp\\.chat/",
+          "group": "2_settings@2"
+        },
+        {
+          "command": "omp.changes.clear",
+          "when": "view =~ /^omp\\.changes/",
+          "group": "navigation"
+        }
       ],
       "view/item/context": [
-        { "command": "omp.agent.steer", "when": "view =~ /^omp\\.agents/ && viewItem == agent.running", "group": "inline@1" },
-        { "command": "omp.agent.cancel", "when": "view =~ /^omp\\.agents/ && viewItem == agent.running", "group": "inline@2" },
-        { "command": "omp.agent.openTranscript", "when": "view =~ /^omp\\.agents/ && viewItem =~ /^agent\\./", "group": "1_inspect@1" },
-        { "command": "omp.agent.inspect", "when": "view =~ /^omp\\.agents/ && viewItem =~ /^agent\\./", "group": "1_inspect@2" },
-        { "command": "omp.changes.openFile", "when": "view =~ /^omp\\.changes/ && viewItem == change", "group": "inline" }
+        {
+          "command": "omp.agent.steer",
+          "when": "view =~ /^omp\\.agents/ && viewItem == agent.running",
+          "group": "inline@1"
+        },
+        {
+          "command": "omp.agent.cancel",
+          "when": "view =~ /^omp\\.agents/ && viewItem == agent.running",
+          "group": "inline@2"
+        },
+        {
+          "command": "omp.agent.openTranscript",
+          "when": "view =~ /^omp\\.agents/ && viewItem =~ /^agent\\./",
+          "group": "1_inspect@1"
+        },
+        {
+          "command": "omp.agent.inspect",
+          "when": "view =~ /^omp\\.agents/ && viewItem =~ /^agent\\./",
+          "group": "1_inspect@2"
+        },
+        {
+          "command": "omp.changes.openFile",
+          "when": "view =~ /^omp\\.changes/ && viewItem == change",
+          "group": "inline"
+        }
       ],
       "explorer/context": [
-        { "command": "omp.addFileToChat", "group": "omp@1" }
+        {
+          "command": "omp.addFileToChat",
+          "group": "omp@1"
+        }
       ],
       "editor/context": [
-        { "command": "omp.addFileToChat", "when": "resourceScheme == file", "group": "omp@1" }
+        {
+          "command": "omp.addFileToChat",
+          "when": "resourceScheme == file",
+          "group": "omp@1"
+        }
       ],
       "editor/title/context": [
-        { "command": "omp.addFileToChat", "when": "resourceScheme == file", "group": "omp@1" }
+        {
+          "command": "omp.addFileToChat",
+          "when": "resourceScheme == file",
+          "group": "omp@1"
+        }
       ],
       "commandPalette": [
-        { "command": "omp.selectThinkingLevel", "when": "omp.hasThinkingLevels" },
-        { "command": "omp.switchSession", "when": "false" },
-        { "command": "omp.agent.inspect", "when": "false" },
-        { "command": "omp.agent.openTranscript", "when": "false" },
-        { "command": "omp.agent.steer", "when": "false" },
-        { "command": "omp.agent.cancel", "when": "false" },
-        { "command": "omp.changes.openDiff", "when": "false" },
-        { "command": "omp.changes.openFile", "when": "false" }
+        {
+          "command": "omp.selectThinkingLevel",
+          "when": "omp.hasThinkingLevels"
+        },
+        {
+          "command": "omp.agent.inspect",
+          "when": "false"
+        },
+        {
+          "command": "omp.agent.openTranscript",
+          "when": "false"
+        },
+        {
+          "command": "omp.agent.steer",
+          "when": "false"
+        },
+        {
+          "command": "omp.agent.cancel",
+          "when": "false"
+        },
+        {
+          "command": "omp.changes.openDiff",
+          "when": "false"
+        },
+        {
+          "command": "omp.changes.openFile",
+          "when": "false"
+        }
       ]
     },
     "configuration": {
@@ -123,14 +357,20 @@
         },
         "omp.extraArgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "scope": "machine-overridable",
           "description": "Extra CLI arguments passed to `omp --mode rpc-ui` (for example `--profile work`). Model, provider and approval configuration stay in OMP."
         },
         "omp.startup": {
           "type": "string",
-          "enum": ["resumeLast", "newSession", "manual"],
+          "enum": [
+            "resumeLast",
+            "newSession",
+            "manual"
+          ],
           "default": "resumeLast",
           "description": "On activation: resume the last session of this workspace, start a fresh one, or wait until a command is run."
         },
@@ -141,7 +381,12 @@
         },
         "omp.logLevel": {
           "type": "string",
-          "enum": ["error", "warn", "info", "debug"],
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
           "default": "info",
           "description": "Verbosity of the oh-my-pi output channel."
         },
@@ -158,31 +403,49 @@
       }
     },
     "viewsWelcome": [
-      { "view": "omp.agents", "contents": "No agents yet." },
-      { "view": "omp.agentsSidebar", "contents": "No agents yet." },
-      { "view": "omp.changes", "contents": "No changes yet. Files edited by OMP appear here." },
-      { "view": "omp.changesSidebar", "contents": "No changes yet. Files edited by OMP appear here." }
+      {
+        "view": "omp.agents",
+        "contents": "No agents yet."
+      },
+      {
+        "view": "omp.agentsSidebar",
+        "contents": "No agents yet."
+      },
+      {
+        "view": "omp.changes",
+        "contents": "No changes yet. Files edited by OMP appear here."
+      },
+      {
+        "view": "omp.changesSidebar",
+        "contents": "No changes yet. Files edited by OMP appear here."
+      }
     ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc -p . --noEmit",
-    "test:unit": "node esbuild.mjs --tests && mocha --exit 'out/test/unit/**/*.test.js'",
+    "typecheck": "tsc -p src/shared && tsc -p . && tsc -p src/webview && tsc -p test",
+    "test:unit": "node esbuild.mjs --tests && mocha --node-option max-old-space-size=1536 --timeout 20000 \"out/test/unit/**/*.test.js\"",
     "test:integration": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js",
+    "test:integration:min": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --vscode-version=min",
     "test": "npm run typecheck && npm run test:unit && npm run test:integration",
-    "test:real": "node esbuild.mjs && node esbuild.mjs --tests && OMP_IT_REAL=1 node out/test/runIntegration.js",
+    "test:real": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --real",
     "package": "npm run build -- --production && node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies --allow-missing-repository -o dist-vsix/oh-my-pi.vsix"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "^22.10.0",
-    "@types/vscode": "^1.95.0",
-    "@vscode/test-electron": "^2.4.1",
-    "@vscode/vsce": "^3.2.1",
-    "esbuild": "^0.24.0",
-    "glob": "^11.0.0",
-    "mocha": "^11.0.1",
-    "typescript": "^5.7.2"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "linkedom": "^0.18.13",
+    "mocha": "^12.0.3",
+    "mocha-host": "npm:mocha@^11.8.0",
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.1.2"
   }
 }

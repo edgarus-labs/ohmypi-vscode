@@ -1,6 +1,8 @@
 import * as assert from "node:assert/strict";
+import * as path from "node:path";
+import { splitUserMessage } from "../../../src/shared/prompt";
 import { composePrompt } from "../../../src/ui/promptComposer";
-import { classifyPaste, splitUserMessage } from "../../../src/webview/userMessage";
+import { admitImages, classifyPaste, MAX_IMAGES } from "../../../src/webview/attachments";
 
 const cwd = "/work/app";
 
@@ -19,7 +21,7 @@ describe("composePrompt", () => {
 			],
 			cwd,
 		});
-		assert.equal(message, 'compare these\n\nAttached: @src/auth.ts @"docs/my notes.md" @/elsewhere/x.ts');
+		assert.equal(message, `compare these\n\nAttached: @${path.join("src", "auth.ts")} @"${path.join("docs", "my notes.md")}" @/elsewhere/x.ts`);
 	});
 
 	it("appends pasted text as named blocks and neutralizes a closing tag inside them", () => {
@@ -67,12 +69,29 @@ describe("splitUserMessage", () => {
 			text: "review",
 			editorContext: "<editor-context>\nx\n</editor-context>",
 			pasted: [{ name: "Pasted text 1", text: "a\n</pasted-text>\nb" }],
-			files: ["src/a b.ts", "src/c.ts"],
+			files: [path.join("src", "a b.ts"), path.join("src", "c.ts")],
 		});
 	});
 
 	it("leaves ordinary messages untouched", () => {
 		assert.deepEqual(splitUserMessage("Attached is a list: @me"), { text: "Attached is a list: @me", pasted: [], files: [] });
+	});
+
+	it("round-trips file names containing quotes", () => {
+		const { message } = composePrompt({
+			text: "look",
+			attachments: [
+				{ id: "1", kind: "file", path: '/work/app/a"b.txt', label: 'a"b.txt' },
+				{ id: "2", kind: "file", path: "/work/app/c.txt", label: "c.txt" },
+			],
+			cwd,
+		});
+		assert.equal(message, 'look\n\nAttached: @"a\\"b.txt" @c.txt');
+		assert.deepEqual(splitUserMessage(message).files, ['a"b.txt', "c.txt"]);
+	});
+
+	it("keeps backslashes of Windows paths in quoted mentions", () => {
+		assert.deepEqual(splitUserMessage('go\n\nAttached: @"C:\\my docs\\a.md"').files, ["C:\\my docs\\a.md"]);
 	});
 });
 
@@ -85,5 +104,36 @@ describe("classifyPaste", () => {
 	it("turns long pastes into attachments", () => {
 		assert.equal(classifyPaste("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11"), "attachment");
 		assert.equal(classifyPaste("x".repeat(1001)), "attachment");
+	});
+});
+
+describe("admitImages", () => {
+	const MB = 1024 * 1024;
+
+	it("accepts images within the per-image, count and total limits", () => {
+		const files = [
+			{ name: "a.png", size: 2 * MB },
+			{ name: "b.png", size: 3 * MB },
+		];
+		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, files), { accepted: files, rejected: [] });
+	});
+
+	it("rejects an image larger than 10 MB", () => {
+		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, [{ name: "", size: 11 * MB }]), {
+			accepted: [],
+			rejected: ["Image from clipboard was not attached: larger than 10 MB."],
+		});
+	});
+
+	it("counts images already attached or being read against the limits", () => {
+		assert.deepEqual(admitImages({ count: MAX_IMAGES, bytes: MB }, [{ name: "x.png", size: 1 }]).rejected, [
+			`Image x.png was not attached: at most ${MAX_IMAGES} images per prompt.`,
+		]);
+		const result = admitImages({ count: 1, bytes: 15 * MB }, [
+			{ name: "y.png", size: 4 * MB },
+			{ name: "z.png", size: 2 * MB },
+		]);
+		assert.deepEqual(result.accepted, [{ name: "y.png", size: 4 * MB }]);
+		assert.deepEqual(result.rejected, ["Image z.png was not attached: images in one prompt may total at most 20 MB."]);
 	});
 });

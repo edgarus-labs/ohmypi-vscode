@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import type { Logger } from "../omp/api";
-import { errorMessage } from "../ui/guards";
 import { type EditorContextData, formatEditorContext, MAX_SELECTION_CHARS } from "./editorContextFormat";
 
 interface GitRepositoryLike {
@@ -19,13 +18,13 @@ function gitChanges(logger: Logger): string[] | undefined {
 		}
 		return [...files];
 	} catch (error) {
-		logger.debug(`Git changes unavailable for editor context: ${errorMessage(error)}`);
+		logger.debug("Git changes unavailable for editor context", error);
 		return undefined;
 	}
 }
 
-/** Collects the editor state attached to prompts. Reads no file contents except the selection. */
-export function gatherEditorContext(logger: Logger): EditorContextData {
+/** Collects the editor state attached to prompts. Reads no file contents except the selection; lists only open editors inside a workspace folder. */
+function gatherEditorContext(logger: Logger): EditorContextData {
 	const editor = vscode.window.activeTextEditor;
 	const activeUri = editor?.document.uri.toString();
 	const data: EditorContextData = {
@@ -53,7 +52,7 @@ export function gatherEditorContext(logger: Logger): EditorContextData {
 		for (const tab of group.tabs) {
 			if (!(tab.input instanceof vscode.TabInputText)) continue;
 			const uri = tab.input.uri;
-			if (uri.toString() === activeUri || seen.has(uri.toString())) continue;
+			if (uri.toString() === activeUri || seen.has(uri.toString()) || !vscode.workspace.getWorkspaceFolder(uri)) continue;
 			seen.add(uri.toString());
 			data.openEditors.push(vscode.workspace.asRelativePath(uri));
 		}

@@ -1,4 +1,4 @@
-import { fenceFor } from "../ui/format";
+import { fenceFor } from "../shared/format";
 
 export interface EditorContextData {
 	workspaceFolders: string[];

@@ -18,7 +18,8 @@ export class BaselineContentProvider implements vscode.TextDocumentContentProvid
 	private sequence = 0;
 
 	constructor(
-		private readonly baseline: (filePath: string) => string | undefined,
+		/** First-seen content of a file; `null` when it did not exist, `undefined` when not kept. */
+		private readonly baseline: (filePath: string) => string | null | undefined,
 		readonly onDidChange: vscode.Event<vscode.Uri>,
 	) {}
 
@@ -29,9 +30,12 @@ export class BaselineContentProvider implements vscode.TextDocumentContentProvid
 		return baselineUri(filePath, key);
 	}
 
+	/** Throws when the content is no longer kept, so VS Code shows an error instead of a misleading diff. */
 	provideTextDocumentContent(uri: vscode.Uri): string {
 		if (uri.query === EMPTY_QUERY) return "";
-		if (uri.query) return this.pinned.get(uri.query) ?? "";
-		return this.baseline(uri.with({ scheme: "file", query: "" }).fsPath) ?? "";
+		const filePath = uri.with({ scheme: "file", query: "" }).fsPath;
+		const content = uri.query ? this.pinned.get(uri.query) : this.baseline(filePath);
+		if (content === undefined) throw new Error(`The OMP baseline of ${filePath} is no longer available; open the diff again from the chat or the Changes view.`);
+		return content ?? "";
 	}
 }

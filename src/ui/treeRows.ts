@@ -1,6 +1,4 @@
-import * as path from "node:path";
 import type { AgentStatus, AgentView } from "../omp/api";
-import type { TrackedChange } from "../vscode/ChangeTracker";
 
 const AGENT_DESCRIPTION_MAX = 48;
 
@@ -30,18 +28,4 @@ export function sortAgents(agents: readonly AgentView[]): AgentView[] {
 export function agentsSummary(agents: readonly AgentView[]): string {
 	const running = agents.filter(agent => agent.status === "running").length;
 	return running > 0 ? `${running} running` : "";
-}
-
-export function changesSummary(count: number): string {
-	return count === 0 ? "" : `${count} ${count === 1 ? "file" : "files"}`;
-}
-
-/** `M · src/auth · +3 −1`; the directory is relative to `cwd` when known. */
-export function changeRowDescription(change: TrackedChange, cwd: string | undefined): string {
-	const dir = path.dirname(change.path);
-	const relative = cwd ? path.relative(cwd, dir) : dir;
-	const parts: string[] = [change.status];
-	if (relative && relative !== ".") parts.push(relative);
-	if (change.status !== "D") parts.push(`+${change.added} −${change.removed}`);
-	return parts.join(" · ");
 }

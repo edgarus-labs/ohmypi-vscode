@@ -12,12 +12,15 @@ export interface Disposable {
 
 export type Event<T> = (listener: (value: T) => void) => Disposable;
 
+/** Every level takes the failure that caused the message; sinks render it with its stack, `code` and `command`. */
 export interface Logger {
 	error(message: string, error?: unknown): void;
-	warn(message: string): void;
-	info(message: string): void;
-	debug(message: string): void;
-	/** RPC frame trace; only emitted when tracing is enabled. Callers pass already-redacted text. */
+	warn(message: string, error?: unknown): void;
+	info(message: string, error?: unknown): void;
+	debug(message: string, error?: unknown): void;
+	/** Whether RPC frames are traced right now; read per frame, so it may change at any time. */
+	readonly traceEnabled: boolean;
+	/** One RPC frame; callers check {@link traceEnabled} first and pass already-redacted text. */
 	trace(direction: "in" | "out", frame: string): void;
 }
 
@@ -38,7 +41,7 @@ export interface ConnectionStatus {
  * idle → submitting (prompt sent, not admitted) → running (admitted / agent_start)
  *      → yielded (prompt_result received, sessionSettled=false; background work may wake the agent)
  *      → idle (session_settled, or prompt_result with sessionSettled=true, or agentInvoked=false).
- * `aborting` is entered by abort() and left on the next prompt_result/agent_end/session_settled.
+ * `aborting` is entered by abort() while the agent is busy and left on the next prompt_result/agent_end/session_settled.
  */
 export type SessionPhase = "idle" | "submitting" | "running" | "yielded" | "aborting";
 
@@ -56,6 +59,8 @@ export interface ModelView {
 	input: string[];
 	/** USD per million tokens, when OMP reports pricing. */
 	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	/** How OMP classifies the model (vendor class, family, revision such as `5.5.0`), when it does. */
+	identity?: { class?: string; family?: string; revision?: string };
 }
 
 export interface TodoTaskView {
@@ -84,7 +89,6 @@ export interface SessionView {
 	availableThinkingLevels: string[];
 	fastModeEnabled?: boolean;
 	fastModeActive?: boolean;
-	isStreaming: boolean;
 	isCompacting: boolean;
 	queue: { steering: string[]; followUp: string[] };
 	contextUsage?: { tokens: number; contextWindow: number; percent: number };
@@ -93,6 +97,21 @@ export interface SessionView {
 	costUsd?: number;
 	/** Last prompt/turn error, cleared when the next prompt is submitted. */
 	lastError?: string;
+	/** Slash commands OMP accepts, in OMP order. */
+	commands: readonly SlashCommandView[];
+	/** The turn in progress, absent between turns. */
+	turn?: TurnProgressView;
+}
+
+export interface SlashCommandView {
+	/** Without the leading `/`. */
+	name: string;
+	source: string;
+	aliases: readonly string[];
+	description?: string;
+	/** OMP `input.hint`, e.g. `[level]`. */
+	hint?: string;
+	subcommands: readonly { name: string; description?: string; usage?: string }[];
 }
 
 export interface ToolResultView {
@@ -111,8 +130,27 @@ export interface UsageView {
 	costUsd?: number;
 }
 
+/** How a turn ended: `aborted` when the user stopped it, `error` when OMP or the model failed. */
+export type TurnStatus = "completed" | "aborted" | "error";
+
+export interface TurnProgressView {
+	/** Epoch ms when the prompt was submitted or the agent woke up. */
+	startedAt: number;
+	/** Output tokens of the turn's finished assistant messages. */
+	outputTokens: number;
+}
+
 export type TranscriptItem =
-	| { kind: "user"; id: string; text: string; imageCount?: number }
+	| {
+			kind: "user";
+			id: string;
+			text: string;
+			imageCount?: number;
+			/** Shown before OMP recorded the prompt; OMP's user message replaces it in place. */
+			pending?: boolean;
+			/** What OMP expanded the typed slash command in `text` to. */
+			expandedText?: string;
+	  }
 	| {
 			kind: "assistant";
 			/** OMP `messageId` (stable across start/update/end). */
@@ -131,7 +169,8 @@ export type TranscriptItem =
 			id: string;
 			name: string;
 			args: unknown;
-			status: "running" | "done" | "error";
+			/** `unresolved`: a stored call with no recorded result (interrupted, or still running elsewhere). */
+			status: "running" | "done" | "error" | "unresolved";
 			/** Latest streamed partial output (tool_execution_update / tool_stream_update), plain text. */
 			partial?: string;
 			result?: ToolResultView;
@@ -139,7 +178,17 @@ export type TranscriptItem =
 			endedAt?: number;
 	  }
 	| { kind: "notice"; id: string; level: "info" | "warning" | "error"; text: string }
-	| { kind: "command_output"; id: string; text: string };
+	| { kind: "command_output"; id: string; text: string }
+	| {
+			/** Closes a turn the agent worked on; follows the turn's last item. */
+			kind: "turn_summary";
+			id: string;
+			status: TurnStatus;
+			/** Absent when unknown (stored messages without timestamps). */
+			durationMs?: number;
+			/** Sum over the turn's assistant messages; `costUsd` absent when none reported a cost. */
+			usage: UsageView;
+	  };
 
 /** Emitted for every tool execution boundary; consumed by change tracking. */
 export interface ToolExecutionEvent {
@@ -216,15 +265,7 @@ export type InteractionRequest =
 			options: Array<{ label: string; description?: string }>;
 			timeoutMs?: number;
 	  }
-	| {
-			id: string;
-			kind: "input";
-			title: string;
-			placeholder?: string;
-			/** Render masked and never echo/log the value. */
-			secret: boolean;
-			timeoutMs?: number;
-	  }
+	| { id: string; kind: "input"; title: string; placeholder?: string; timeoutMs?: number }
 	| { id: string; kind: "editor"; title: string; prefill?: string }
 	| { id: string; kind: "ask"; questions: AskQuestionView[]; timeoutMs?: number };
 
@@ -241,19 +282,80 @@ export type PresentationRequest =
 	| { kind: "openUrl"; url: string; instructions?: string }
 	| { kind: "editorText"; text: string };
 
+/** One rate limit of a provider, from OMP's `/usage` report. */
+export interface UsageLimit {
+	/** Limit name, qualified with its quota bucket when `omp usage --json` names one. */
+	name: string;
+	account: string;
+	/** 0–100, rounded to two decimals. */
+	usedPercent: number;
+	/** The current session draws on this limit. */
+	inUse: boolean;
+	/** When the limit resets, as OMP words it (e.g. `in 4h`). */
+	resets?: string;
+}
+
+/** A configured provider and its rate limits. */
+export interface ProviderUsage {
+	provider: string;
+	limits: UsageLimit[];
+}
+
 export interface OmpServiceOptions {
 	/** Resolved absolute executable path. */
 	executable: string;
 	/** Arguments appended after `--mode rpc-ui`. */
 	extraArgs: string[];
 	cwd: string;
-	env?: NodeJS.ProcessEnv;
+	/** Environment of the OMP process (default: the host's). */
+	env?: Record<string, string | undefined>;
 	logger: Logger;
 	autoRestart: boolean;
 	/** Default per-request timeout (ms); long-running commands use their own. */
 	requestTimeoutMs?: number;
-	/** Pass abbreviated, redacted RPC frames to `logger.trace`. Off by default (formatting every frame costs CPU). */
-	traceRpc?: boolean;
+	/** Tools of the host that OMP's agent may call; registered with every OMP process the service starts. */
+	hostTools?: HostTools;
+}
+
+/** A host tool as OMP's agent sees it. */
+export interface HostToolDefinition {
+	name: string;
+	description: string;
+	/** JSON schema of the tool's arguments object. */
+	parameters: Record<string, unknown>;
+}
+
+/** The part of `AbortSignal` a host tool sees (this module stays free of DOM and Node types). */
+export interface HostToolSignal {
+	readonly aborted: boolean;
+	readonly reason: unknown;
+	addEventListener(type: "abort", listener: () => void, options?: { once?: boolean }): void;
+	removeEventListener(type: "abort", listener: () => void): void;
+}
+
+/** Tools the host runs for OMP's agent. */
+export interface HostTools {
+	readonly definitions: readonly HostToolDefinition[];
+	/**
+	 * Runs tool `name`: resolves to the text the agent reads, rejects with the error it reads instead.
+	 * `signal` aborts when OMP cancels the call or its process goes away.
+	 */
+	invoke(name: string, args: Record<string, unknown>, signal: HostToolSignal): Promise<string>;
+}
+
+/** Which session OMP binds when it starts. */
+export interface SessionBinding {
+	/** Resume this session file; a missing file starts a new session instead. */
+	resumeSessionFile?: string;
+	newSession?: boolean;
+}
+
+/**
+ * True for the rejection of a start whose launch was cancelled by a later
+ * `restart()`/`stop()`; it reports no failure to the user.
+ */
+export function isSupersededError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === "superseded";
 }
 
 /**
@@ -266,12 +368,17 @@ export interface OmpServiceApi extends Disposable {
 	readonly session: SessionView;
 	readonly transcript: readonly TranscriptItem[];
 	readonly agents: readonly AgentView[];
+	/**
+	 * Status texts OMP set (`setStatus`) by key, in the order each key was first set. Cleared when the process
+	 * ends, with an `onPresentation` status withdrawal for every key.
+	 */
+	readonly statuses: ReadonlyMap<string, string>;
 
 	readonly onDidChangeConnection: Event<ConnectionStatus>;
 	readonly onDidChangeSession: Event<SessionView>;
 	/** Fires with the item that was added or changed (streaming updates included). */
 	readonly onDidChangeTranscriptItem: Event<TranscriptItem>;
-	/** Fires when the transcript was replaced wholesale (new/switched session, history load). */
+	/** Fires when the transcript was replaced wholesale (new/switched session, history load) or an item was removed. */
 	readonly onDidResetTranscript: Event<readonly TranscriptItem[]>;
 	readonly onDidChangeAgents: Event<readonly AgentView[]>;
 	readonly onToolExecution: Event<ToolExecutionEvent>;
@@ -280,23 +387,39 @@ export interface OmpServiceApi extends Disposable {
 	readonly onInteractionCancelled: Event<string>;
 	readonly onPresentation: Event<PresentationRequest>;
 
-	/** Spawn, handshake, configure subscriptions, and optionally bind a session. */
-	start(options?: { resumeSessionFile?: string; newSession?: boolean }): Promise<void>;
-	/** Stop and start again, re-binding the current session file. */
+	/** Spawn, handshake, configure subscriptions, and optionally bind a session. Clears a pending automatic restart. */
+	start(options?: SessionBinding): Promise<void>;
+	/** Stop and start again, re-binding the current session file; cancels a launch in flight. */
 	restart(): Promise<void>;
-	/** Graceful shutdown: close stdin, wait, then terminate the process tree. */
+	/** Graceful shutdown: close stdin, wait, then terminate the process tree; cancels a launch in flight. */
 	stop(): Promise<void>;
 
 	listModels(): Promise<ModelView[]>;
 	setModel(provider: string, modelId: string): Promise<void>;
 	setThinkingLevel(level: string): Promise<void>;
 	setFastMode(enabled: boolean): Promise<void>;
+	/**
+	 * Rate limits per provider from OMP's `/usage`, kept off the transcript; limits are named by quota bucket
+	 * when `omp usage --json` succeeds. One request runs at a time. Rejects when OMP printed no usage report.
+	 */
+	getUsage(): Promise<ProviderUsage[]>;
 
+	/**
+	 * Shows the user's prompt in the transcript at once as a pending user item, before it is sent.
+	 * Returns its id for {@link prompt}, or `undefined` while the agent is busy (steering and follow-ups
+	 * show in the queue instead).
+	 */
+	addPendingPrompt(text: string, imageCount: number): string | undefined;
+	/** Removes a pending prompt item whose prompt is not going to be sent. */
+	discardPendingPrompt(id: string): void;
 	/**
 	 * Send user input. `auto`: plain prompt when idle, `steer` while the agent works.
 	 * Resolves at the prompt's completion (`prompt_result` or local completion), not at acknowledgement.
+	 * `pendingItemId` (from {@link addPendingPrompt}) is removed when OMP does not admit the prompt and
+	 * stays, no longer pending, when the prompt completes without OMP recording a user message.
 	 */
-	prompt(text: string, mode?: PromptMode, images?: readonly PromptImage[]): Promise<PromptOutcome>;
+	prompt(text: string, mode?: PromptMode, images?: readonly PromptImage[], pendingItemId?: string): Promise<PromptOutcome>;
+	/** Stops the turn and cancels every running or pending subagent; resolves once OMP accepted the abort. */
 	abort(): Promise<void>;
 	newSession(): Promise<void>;
 	switchSession(sessionFile: string): Promise<void>;
@@ -304,9 +427,14 @@ export interface OmpServiceApi extends Disposable {
 	/** Sessions stored next to the current session file, newest first. */
 	listSessions(): Promise<SessionSummary[]>;
 
+	/**
+	 * Answer a pending interaction. Unknown or withdrawn ids are ignored; throws when the
+	 * answer cannot be delivered, and the interaction then stays pending.
+	 */
 	respondInteraction(id: string, response: InteractionResponse): void;
 
 	cancelAgent(agentId: string): Promise<boolean>;
+	/** "main" steers the session's own turn (rejects when OMP is not running); others steer a subagent. */
 	steerAgent(agentId: string, message: string): Promise<void>;
 	/** Transcript of a subagent ("main" returns the current session transcript). */
 	getAgentTranscript(agentId: string): Promise<TranscriptItem[]>;

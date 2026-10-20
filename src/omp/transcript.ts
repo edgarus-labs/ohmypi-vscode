@@ -1,34 +1,26 @@
-import type { SessionView, ToolExecutionEvent, ToolResultView, TranscriptItem, UsageView } from "./api";
+import { isRecord } from "../shared/guards";
+import { emptySessionView } from "../shared/session";
+import type { SessionPhase, SessionView, ToolExecutionEvent, ToolResultView, TranscriptItem, TurnProgressView, TurnStatus, UsageView } from "./api";
 import { Emitter } from "./emitter";
 import { toModelView } from "./models";
-import {
-	type AgentMessage,
-	type AssistantMessage,
-	type BashExecutionMessage,
-	isRecord,
-	type MessageContent,
-	type SessionEvent,
-	type SessionState,
-	type ToolCall,
-	type ToolResultMessage,
-	type Usage,
-	type UserMessage,
+import type {
+	AgentMessage,
+	AssistantMessage,
+	BashExecutionMessage,
+	MessageContent,
+	SessionEvent,
+	SessionState,
+	ToolCall,
+	ToolResultMessage,
+	Usage,
+	UserMessage,
 } from "./protocol";
+import { StoredTurns, type TurnSummaryItem, TurnTally } from "./turns";
 
+type UserItem = Extract<TranscriptItem, { kind: "user" }>;
 type AssistantItem = Extract<TranscriptItem, { kind: "assistant" }>;
 type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
 type NoticeLevel = "info" | "warning" | "error";
-
-export function emptySessionView(): SessionView {
-	return {
-		phase: "idle",
-		availableThinkingLevels: [],
-		isStreaming: false,
-		isCompacting: false,
-		queue: { steering: [], followUp: [] },
-		todos: [],
-	};
-}
 
 /** Text of `{ type: "text" }` blocks (or a bare string), joined by `separator`. */
 function textOf(content: unknown, separator = "\n"): string {
@@ -41,7 +33,7 @@ function textOf(content: unknown, separator = "\n"): string {
 	return parts.join(separator);
 }
 
-function userItem(id: string, message: UserMessage): TranscriptItem {
+function userItem(id: string, message: UserMessage): UserItem {
 	const content: MessageContent = message.content;
 	const imageCount = Array.isArray(content) ? content.filter(block => block.type === "image").length : 0;
 	return { kind: "user", id, text: textOf(content), ...(imageCount > 0 ? { imageCount } : {}) };
@@ -100,17 +92,21 @@ function partialText(payload: unknown): string | undefined {
 
 /**
  * Map a stored conversation (`get_messages`, `get_subagent_messages`) into
- * transcript items. Tool calls become tool items completed by their results.
+ * transcript items. Tool calls become tool items completed by their results;
+ * each finished turn is followed by its summary.
  */
 export function historyToItems(messages: readonly AgentMessage[]): TranscriptItem[] {
 	const items: TranscriptItem[] = [];
 	const tools = new Map<string, number>();
+	const turns = new StoredTurns();
 	messages.forEach((message, index) => {
 		const id = `h${index}`;
 		switch (message.role) {
 			case "user": {
 				const user = message as UserMessage;
-				if (!user.synthetic) items.push(userItem(id, user));
+				if (user.synthetic) return;
+				turns.user(user.timestamp);
+				items.push(userItem(id, user));
 				return;
 			}
 			case "assistant": {
@@ -125,15 +121,16 @@ export function historyToItems(messages: readonly AgentMessage[]): TranscriptIte
 						id: call.id,
 						name: call.name,
 						args: call.arguments,
-						status: "error",
-						result: { text: "No result recorded", isError: true },
+						status: "unresolved",
 						startedAt: assistant.timestamp ?? 0,
 					});
 				}
+				turns.assistant(assistant, id, items.length);
 				return;
 			}
 			case "toolResult": {
 				const result = message as ToolResultMessage;
+				turns.toolResult(result.timestamp);
 				const view = toolResultView(result, result.isError);
 				const at = tools.get(result.toolCallId);
 				if (at === undefined) return;
@@ -153,7 +150,7 @@ export function historyToItems(messages: readonly AgentMessage[]): TranscriptIte
 			}
 		}
 	});
-	return items;
+	return turns.withSummaries(items);
 }
 
 function costOf(messages: readonly AgentMessage[]): number | undefined {
@@ -171,9 +168,22 @@ interface StreamCursor {
 	thinkingIndex?: number;
 }
 
+/** The turn in progress in a live session. */
+interface LiveTurn {
+	tally: TurnTally;
+	progress: TurnProgressView;
+	/** The agent started or replied; a prompt it never worked on (a local command) gets no summary. */
+	agentRan: boolean;
+	aborting: boolean;
+	/** What OMP reported in the prompt result, or `error` when the process went away. */
+	outcome?: TurnStatus;
+}
+
 /**
  * Reduces OMP session events and snapshots into the host's {@link SessionView}
- * and transcript.
+ * and transcript. A turn starts when the session leaves `idle` (the prompt is
+ * submitted or the agent wakes up) and ends when it is `idle` or `yielded`
+ * again; a turn the agent worked on is followed by its summary.
  */
 export class SessionStore {
 	#session: SessionView = emptySessionView();
@@ -181,7 +191,14 @@ export class SessionStore {
 	readonly #index = new Map<string, number>();
 	readonly #cursors = new Map<string, StreamCursor>();
 	#lastAssistantId: string | undefined;
+	#lastUserId: string | undefined;
 	#localId = 0;
+	/** Pending user items not matched to an OMP user message yet, oldest first. */
+	readonly #pendingUsers: string[] = [];
+	/** OMP user `messageId` → id of the pending item its message replaced. */
+	readonly #userAliases = new Map<string, string>();
+	readonly #now: () => number;
+	#turn: LiveTurn | undefined;
 
 	readonly #changeSession: Emitter<SessionView>;
 	readonly #changeItem: Emitter<TranscriptItem>;
@@ -192,7 +209,8 @@ export class SessionStore {
 	readonly onDidReset;
 	readonly onToolExecution;
 
-	constructor(onListenerError?: (error: unknown) => void) {
+	constructor(onListenerError?: (error: unknown) => void, now: () => number = Date.now) {
+		this.#now = now;
 		this.#changeSession = new Emitter<SessionView>(onListenerError);
 		this.#changeItem = new Emitter<TranscriptItem>(onListenerError);
 		this.#reset = new Emitter<readonly TranscriptItem[]>(onListenerError);
@@ -221,8 +239,18 @@ export class SessionStore {
 	}
 
 	update(patch: Partial<SessionView>): void {
-		this.#session = { ...this.#session, ...patch };
-		this.#changeSession.fire(this.#session);
+		const summary = patch.phase === undefined || patch.phase === this.#session.phase ? undefined : this.#trackTurn(patch.phase);
+		const next = { ...this.#session, ...patch };
+		if (this.#turn) next.turn = this.#turn.progress;
+		else delete next.turn;
+		this.#session = next;
+		this.#changeSession.fire(next);
+		if (summary) this.#add(summary);
+	}
+
+	/** How OMP says the current turn ended; consulted when the turn ends. */
+	noteTurnOutcome(status: TurnStatus): void {
+		if (this.#turn) this.#turn.outcome = status;
 	}
 
 	applyState(state: SessionState): void {
@@ -240,7 +268,6 @@ export class SessionStore {
 				tasks: phase.tasks.map(task => ({ content: task.content, status: task.status })),
 			})),
 		};
-		if (state.isStreaming !== undefined) patch.isStreaming = state.isStreaming;
 		if (state.isCompacting !== undefined) patch.isCompacting = state.isCompacting;
 		if (state.queuedMessages) {
 			patch.queue = { steering: [...state.queuedMessages.steering], followUp: [...state.queuedMessages.followUp] };
@@ -248,15 +275,43 @@ export class SessionStore {
 		this.update(patch);
 	}
 
-	/** Replace the transcript with a stored conversation. */
+	/** Replace the transcript with a stored conversation; pending user items stay at its end. */
 	reset(messages: readonly AgentMessage[]): void {
-		this.#items = historyToItems(messages);
-		this.#index.clear();
+		const pending = this.#pendingUsers.flatMap(id => this.#get(id) ?? []);
+		this.#items = [...historyToItems(messages), ...pending];
 		this.#cursors.clear();
+		this.#userAliases.clear();
 		this.#lastAssistantId = undefined;
-		this.#items.forEach((item, i) => this.#index.set(item.id, i));
+		this.#lastUserId = undefined;
+		this.#reindex();
 		this.#reset.fire(this.#items);
 		this.update({ costUsd: costOf(messages) });
+	}
+
+	/** Adds a user prompt OMP has not recorded yet, marked pending; returns its id. */
+	addPendingUser(text: string, imageCount: number): string {
+		const id = this.#nextLocalId("user");
+		this.#pendingUsers.push(id);
+		this.#add({ kind: "user", id, text, ...(imageCount > 0 ? { imageCount } : {}), pending: true });
+		return id;
+	}
+
+	/** The prompt of a pending item completed without OMP recording it: the item stays, no longer pending. */
+	confirmPendingUser(id: string): void {
+		if (!this.#takePending(id)) return;
+		const item = this.#get(id);
+		if (item?.kind !== "user") return;
+		const confirmed = { ...item };
+		delete confirmed.pending;
+		this.#set(confirmed);
+	}
+
+	/** Removes a pending item whose prompt OMP did not admit; the transcript is reset without it. */
+	removePendingUser(id: string): void {
+		if (!this.#takePending(id)) return;
+		this.#items = this.#items.filter(item => item.id !== id);
+		this.#reindex();
+		this.#reset.fire(this.#items);
 	}
 
 	addNotice(level: NoticeLevel, text: string): void {
@@ -269,12 +324,12 @@ export class SessionStore {
 
 	applyEvent(event: SessionEvent): void {
 		switch (event.type) {
-			case "agent_start":
-				this.update({ isStreaming: true });
+			case "agent_start": {
+				const started = this.#turn === undefined;
+				this.#startTurn().agentRan = true;
+				if (started) this.update({});
 				return;
-			case "agent_end":
-				this.update({ isStreaming: false });
-				return;
+			}
 			case "message_start":
 			case "message_end":
 				this.#applyMessage(event.messageId, event.message, event.type === "message_start");
@@ -341,6 +396,18 @@ export class SessionStore {
 		return `${prefix}-${this.#localId}`;
 	}
 
+	#reindex(): void {
+		this.#index.clear();
+		this.#items.forEach((item, i) => this.#index.set(item.id, i));
+	}
+
+	#takePending(id: string): boolean {
+		const at = this.#pendingUsers.indexOf(id);
+		if (at < 0) return false;
+		this.#pendingUsers.splice(at, 1);
+		return true;
+	}
+
 	#add(item: TranscriptItem): void {
 		this.#index.set(item.id, this.#items.length);
 		this.#items.push(item);
@@ -365,7 +432,10 @@ export class SessionStore {
 	#applyMessage(messageId: string | undefined, message: AgentMessage, starting: boolean): void {
 		if (message.role === "user") {
 			const user = message as UserMessage;
-			if (!user.synthetic) this.#set(userItem(messageId ?? this.#nextLocalId("user"), user));
+			if (user.synthetic) return;
+			const id = this.#userItemId(messageId, starting);
+			this.#lastUserId = id;
+			this.#set(this.#recordedUser(id, user));
 			return;
 		}
 		if (message.role !== "assistant") return;
@@ -378,8 +448,58 @@ export class SessionStore {
 			return;
 		}
 		this.#cursors.delete(id);
+		const patch: Partial<SessionView> = {};
 		const cost = assistant.usage?.cost?.total;
-		if (typeof cost === "number") this.update({ costUsd: (this.#session.costUsd ?? 0) + cost });
+		if (typeof cost === "number") patch.costUsd = (this.#session.costUsd ?? 0) + cost;
+		const turn = this.#turn;
+		if (turn) {
+			turn.agentRan = true;
+			turn.tally.add(assistant);
+			turn.progress = { ...turn.progress, outputTokens: turn.tally.usage.output };
+		}
+		if (turn || patch.costUsd !== undefined) this.update(patch);
+	}
+
+	#startTurn(): LiveTurn {
+		this.#turn ??= { tally: new TurnTally(), progress: { startedAt: this.#now(), outputTokens: 0 }, agentRan: false, aborting: false };
+		return this.#turn;
+	}
+
+	/** Starts a turn when the session becomes busy, ends it when it is idle or yielded; returns the summary to append. */
+	#trackTurn(phase: SessionPhase): TurnSummaryItem | undefined {
+		if (phase !== "idle" && phase !== "yielded") {
+			const turn = this.#startTurn();
+			if (phase === "aborting") turn.aborting = true;
+			return undefined;
+		}
+		const turn = this.#turn;
+		this.#turn = undefined;
+		if (!turn?.agentRan) return undefined;
+		const status = turn.outcome ?? turn.tally.impliedStatus(turn.aborting);
+		return turn.tally.summary(this.#nextLocalId("turn"), status, this.#now() - turn.progress.startedAt);
+	}
+
+	/** Item id of an OMP user message: the item it already updates, else the oldest pending item, else a new one. */
+	#userItemId(messageId: string | undefined, starting: boolean): string {
+		if (messageId === undefined) {
+			if (!starting && this.#lastUserId !== undefined) return this.#lastUserId;
+			return this.#pendingUsers.shift() ?? this.#nextLocalId("user");
+		}
+		const known = this.#userAliases.get(messageId) ?? (this.#index.has(messageId) ? messageId : undefined);
+		if (known !== undefined) return known;
+		const pending = this.#pendingUsers.shift();
+		if (pending === undefined) return messageId;
+		this.#userAliases.set(messageId, pending);
+		return pending;
+	}
+
+	/** OMP's user message; a typed slash command it expanded stays visible with the expansion alongside. */
+	#recordedUser(id: string, message: UserMessage): UserItem {
+		const item = userItem(id, message);
+		const shown = this.#get(id);
+		const typed = shown?.kind === "user" && (shown.pending || shown.expandedText !== undefined) ? shown.text : undefined;
+		if (typed === undefined || !typed.startsWith("/") || typed === item.text) return item;
+		return { ...item, text: typed, expandedText: item.text };
 	}
 
 	#applyMessageUpdate(event: Extract<SessionEvent, { type: "message_update" }>): void {
