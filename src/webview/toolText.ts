@@ -241,14 +241,30 @@ export function changedSpans(lines: readonly string[]): Array<ChangedSpan | unde
 
 /** Most search matches marked in one text; a pattern matching more marks only the first ones. */
 const MAX_MARKS = 10_000;
+/** Columns of a line searched for marks, which bounds a backtracking pattern's work on one line. */
+const MARKED_COLUMNS = 1000;
 
-/** `[start, end)` of each non-empty match of the global `pattern` in `text`, at most {@link MAX_MARKS}. */
+/**
+ * `[start, end)` of each non-empty match of the global `pattern` within a line of `text`, at most
+ * {@link MAX_MARKS}. A longer line is searched in its first {@link MARKED_COLUMNS} columns, and a match reaching
+ * that cut is left out, since the cut may have ended it.
+ */
 export function findMarks(text: string, pattern: RegExp): Array<{ start: number; end: number }> {
 	const marks: Array<{ start: number; end: number }> = [];
-	pattern.lastIndex = 0;
-	for (let match = pattern.exec(text); match && marks.length < MAX_MARKS; match = pattern.exec(text)) {
-		if (match[0].length === 0) pattern.lastIndex++;
-		else marks.push({ start: match.index, end: match.index + match[0].length });
+	for (let start = 0; marks.length < MAX_MARKS; ) {
+		const newline = text.indexOf("\n", start);
+		const end = newline < 0 ? text.length : newline;
+		const cut = end - start > MARKED_COLUMNS;
+		const line = text.slice(start, cut ? start + MARKED_COLUMNS : end);
+		pattern.lastIndex = 0;
+		for (let match = pattern.exec(line); match && marks.length < MAX_MARKS; match = pattern.exec(line)) {
+			const matchEnd = match.index + match[0].length;
+			if (cut && matchEnd === line.length) break;
+			if (match[0].length === 0) pattern.lastIndex++;
+			else marks.push({ start: start + match.index, end: start + matchEnd });
+		}
+		if (newline < 0) break;
+		start = newline + 1;
 	}
 	return marks;
 }

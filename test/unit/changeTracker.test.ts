@@ -145,6 +145,15 @@ describe("ChangeTracker", () => {
 		assert.deepEqual(stub.callsTo("window.showWarningMessage"), []);
 	});
 
+	it("matches the file asked for to a result path that differs only in letter case on Windows", async function () {
+		if (process.platform !== "win32") this.skip();
+		fs.writeFileSync(path.join(dir, "b.ts"), "now\n");
+		const item = toolItem("t9", { path: "b.ts" }, { path: path.join(dir, "b.ts").toUpperCase(), oldText: "then\n" });
+		assert.equal(await tracker.openToolDiff(item, "b.ts"), true);
+		const [[, left]] = diffCalls();
+		assert.equal(tracker.contentProvider.provideTextDocumentContent(left as never), "then\n");
+	});
+
 	it("diffs a file the tool created against its empty oldText", async () => {
 		fs.writeFileSync(path.join(dir, "b.ts"), "now\n");
 		const item = toolItem("t9", {}, { path: path.join(dir, "b.ts"), oldText: "" });

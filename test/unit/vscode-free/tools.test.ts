@@ -16,6 +16,7 @@ import {
 	toolHeadline,
 	toolState,
 } from "../../../src/webview/tools";
+import { findMarks } from "../../../src/webview/toolText";
 
 function tool(overrides: Partial<ToolItem> & Pick<ToolItem, "name">): ToolItem {
 	return { kind: "tool", id: "t1", args: {}, status: "done", startedAt: 1_000, ...overrides };
@@ -159,6 +160,9 @@ describe("toolHeadline", () => {
 		const head = toolHeadline(tool({ name: "write", args: { path: "a.txt", content: "1\n2\n3" }, endedAt: 1_001 }));
 		assert.equal(head.detail, "3 lines · 1ms");
 		assert.equal(head.primary, "a.txt");
+		assert.equal(toolHeadline(tool({ name: "write", args: { path: "a.txt", content: "1\n2\n3\n" } })).detail, "3 lines");
+		assert.equal(toolHeadline(tool({ name: "write", args: { path: "a.txt", content: "1\r\n2\r\n" } })).detail, "2 lines");
+		assert.equal(toolHeadline(tool({ name: "write", args: { path: "a.txt", content: "1\n\n" } })).detail, "2 lines");
 	});
 
 	it("shows paths inside the working directory relative to it", () => {
@@ -170,6 +174,16 @@ describe("toolHeadline", () => {
 		assert.equal(outside.primary, "/work/application/a.cs");
 		const windows = toolHeadline(tool({ name: "read", args: { path: "C:\\repo\\src\\a.cs" }, endedAt: 1_001 }), "C:\\repo");
 		assert.equal(windows.primary, "src\\a.cs");
+	});
+
+	it("keeps the working directory itself in full", () => {
+		const primary = (command: string) => toolHeadline(tool({ name: "bash", args: { command } }), "/home/u/proj").primary;
+		assert.equal(primary("rm -rf /home/u/proj/"), "rm -rf /home/u/proj/");
+		assert.equal(primary("cd /home/u/proj/ && make"), "cd /home/u/proj/ && make");
+		assert.equal(primary("cd /home/u/proj/;make"), "cd /home/u/proj/;make");
+		assert.equal(primary('ls "/home/u/proj/"'), 'ls "/home/u/proj/"');
+		assert.equal(primary("cat /home/u/proj/a.txt /home/u/proj/*"), "cat a.txt *");
+		assert.equal(fileLinkLabel("C:\\repo\\", undefined, "C:\\repo"), "C:\\repo\\");
 	});
 
 	it("names MCP tools by server and tool", () => {
@@ -380,10 +394,55 @@ describe("searchPattern", () => {
 		assert.ok(pattern?.test("call foo(1)"));
 	});
 
-	it("marks a pattern that could backtrack without bound as literal text", () => {
-		assert.equal(searchPattern(tool({ name: "grep", args: { pattern: "(a+)+$" } }))?.source, "\\(a\\+\\)\\+\\$");
-		assert.equal(searchPattern(tool({ name: "grep", args: { pattern: "(\\w*)*x" } }))?.source, "\\(\\\\w\\*\\)\\*x");
-		assert.equal(searchPattern(tool({ name: "grep", args: { pattern: "(ab)+c" } }))?.source, "(ab)+c");
+	const grep = (pattern: string) => searchPattern(tool({ name: "grep", args: { pattern } }));
+	const literal = (pattern: string) => pattern.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+	/** Patterns a backtracking regex can spend super-linear time on: quantified groups, backreferences, alternation in a group, several quantifiers, or a long pattern. */
+	const RUNAWAY = [
+		"(a+)+$",
+		"(\\w*)*x",
+		"(ab)+c",
+		"(\\w+\\s?)+:",
+		"(a|aa)+b",
+		"((a+))+b",
+		"(.*a){12}",
+		"(\\d+\\.?)+",
+		"(\\w+,?)+",
+		"(?:ab)?c",
+		"(?=a)*b",
+		"(\\w+)\\s\\1",
+		"(?<w>\\w)\\k<w>",
+		"(a|a)(a|a)(a|a)b",
+		"a*a*x",
+		".*.*=",
+		"\\w+\\s?\\w+:",
+		"\\w*a{900}b",
+		"\\d{1,3}\\.\\d{1,3}",
+		"a?a?a?b",
+		`\\w*${"[a]".repeat(40)}b`,
+	];
+	/** Patterns whose work per position stays bounded: one repeating quantifier, up to two optional ones, alternation at the top level only. */
+	const BOUNDED = ["^foo\\d", "foo\\s+bar", "https?://\\S+", "TODO|FIXME", "export (?:const) \\w+", "(?<=a)b+", "[(|)+*]+x", "\\(x\\)+", "colou?r", ".*x", "\\w+\\s?:", "a?a?a+x", "x{2}"];
+
+	it("marks a pattern whose backtracking could outgrow the text as literal text", () => {
+		for (const pattern of RUNAWAY) assert.equal(grep(pattern)?.source, literal(pattern), pattern);
+	});
+
+	it("compiles a pattern whose backtracking stays bounded", () => {
+		for (const pattern of BOUNDED) assert.equal(grep(pattern)?.source, new RegExp(pattern).source, pattern);
+	});
+
+	it("marks the largest open result quickly whatever the pattern", () => {
+		const lines = ["a".repeat(5000), "a".repeat(999), "1".repeat(999), "1.".repeat(499), "a,".repeat(499), "a ".repeat(499), "a".repeat(29)];
+		let text = "";
+		while (text.length < 200_000) text += `${lines.join("\n")}\n`;
+		for (const pattern of [...RUNAWAY, ...BOUNDED]) {
+			const mark = grep(pattern);
+			assert.ok(mark);
+			const started = performance.now();
+			findMarks(text, mark);
+			const elapsed = performance.now() - started;
+			assert.ok(elapsed < 1000, `${pattern} took ${Math.round(elapsed)} ms`);
+		}
 	});
 
 	it("marks nothing for other tools or calls without a pattern", () => {

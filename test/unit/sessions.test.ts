@@ -88,6 +88,27 @@ describe("listSessions", () => {
 		assert.equal(session.firstMessage, `${"a".repeat(199)}😀…`);
 	});
 
+	it("shows the typed text of a prompt the extension wrote, without its editor context, pasted text or attachments", async () => {
+		const prompt = [
+			"<editor-context>\nworkspace: d:\\w\ngit changes: a.ts, b.ts\n</editor-context>",
+			"ruthere?",
+			'<pasted-text name="log">\nnoise\n</pasted-text>',
+			"Attached: @src/a.ts",
+		].join("\n\n");
+		const onlyContext = "<editor-context>\nworkspace: d:\\w\n</editor-context>\n\nAttached: @a.ts";
+		write(
+			"p.jsonl",
+			[
+				{ type: "session", id: "s-p" },
+				{ type: "message", message: { role: "user", content: onlyContext } },
+				{ type: "message", message: { role: "user", content: [{ type: "text", text: prompt }] } },
+			],
+			1000,
+		);
+		const [session] = await listSessions(dir, memoryLogger());
+		assert.equal(session.firstMessage, "ruthere?");
+	});
+
 	it("skips and logs a session file that cannot be read, listing the others", async () => {
 		write("locked.jsonl", [{ type: "session", id: "s-locked" }], 2000);
 		const ok = write("ok.jsonl", [{ type: "session", id: "s-ok" }], 1000);

@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Logger, ToolExecutionEvent } from "../omp/api";
 import { toolArgPaths, toolResultFiles } from "../shared/toolFiles";
-import { isWithinRoots, lineDelta, resolveToolPath } from "./changePaths";
+import { isWithinRoots, lineDelta, pathKey, resolveToolPath } from "./changePaths";
 
 export interface TrackedChange {
 	/** Absolute filesystem path. */
@@ -56,37 +56,29 @@ export async function readSnapshot(filePath: string, logger: Logger): Promise<Sn
 	}
 }
 
-/**
- * Map keyed by absolute file path. Windows paths are case-insensitive and VS Code
- * lowercases the drive letter in `Uri.fsPath`, so keys are compared case-insensitively
- * there; `keys()` returns each path as first seen.
- */
+/** Map keyed by absolute file path, compared by {@link pathKey}; `keys()` returns each path as first seen. */
 class PathMap<V> {
 	private readonly entries = new Map<string, { path: string; value: V }>();
-
-	private static key(filePath: string): string {
-		return process.platform === "win32" ? path.win32.normalize(filePath).toLowerCase() : filePath;
-	}
 
 	get size(): number {
 		return this.entries.size;
 	}
 
 	has(filePath: string): boolean {
-		return this.entries.has(PathMap.key(filePath));
+		return this.entries.has(pathKey(filePath));
 	}
 
 	get(filePath: string): V | undefined {
-		return this.entries.get(PathMap.key(filePath))?.value;
+		return this.entries.get(pathKey(filePath))?.value;
 	}
 
 	set(filePath: string, value: V): void {
-		const key = PathMap.key(filePath);
+		const key = pathKey(filePath);
 		this.entries.set(key, { path: this.entries.get(key)?.path ?? filePath, value });
 	}
 
 	delete(filePath: string): boolean {
-		return this.entries.delete(PathMap.key(filePath));
+		return this.entries.delete(pathKey(filePath));
 	}
 
 	clear(): void {
@@ -213,7 +205,7 @@ export class ChangeModel {
 		const reported = new Map<string, string | undefined>();
 		for (const file of toolResultFiles(event.result?.details)) {
 			const resolved = resolve(file.path);
-			if (resolved && !reported.has(resolved)) reported.set(resolved, file.oldText);
+			if (resolved && reported.get(resolved) === undefined) reported.set(resolved, file.oldText);
 		}
 		for (const [filePath, oldText] of reported) {
 			if (typeof oldText !== "string" || this.baselineSource.get(filePath) !== event.toolCallId) continue;

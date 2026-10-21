@@ -99,7 +99,8 @@ export class Header {
 		this.#statuses = statuses;
 		this.#renderActivity();
 		const tier = statuses.find(status => status.key === TIER_STATUS_KEY);
-		this.#resumeSlot.replaceChildren(...(tier && isRouterPaused(tier.text) ? [this.#resumeButton] : []));
+		const paused = tier !== undefined && isRouterPaused(tier.text);
+		if ((this.#resumeButton.parentNode === this.#resumeSlot) !== paused) this.#resumeSlot.replaceChildren(...(paused ? [this.#resumeButton] : []));
 	}
 
 	#renderElapsed(): void {
@@ -131,12 +132,16 @@ export class Header {
 export class Banner {
 	readonly element = h("div", { class: "banner hidden" });
 	readonly #post: (message: WebviewMessage) => void;
+	#shown: string | undefined;
 
 	constructor(post: (message: WebviewMessage) => void) {
 		this.#post = post;
 	}
 
+	/** Shows `unavailable`; the same reason again keeps the banner's nodes (and keyboard focus on its buttons). */
 	render(unavailable: string | undefined): void {
+		if (unavailable === this.#shown) return;
+		this.#shown = unavailable;
 		if (!unavailable) {
 			this.element.className = "banner hidden";
 			this.element.replaceChildren();

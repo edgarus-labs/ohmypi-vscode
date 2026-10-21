@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { deferred } from "../shared/deferred";
 import type { Event, Logger } from "./api";
@@ -52,7 +53,7 @@ export class OmpProcess implements OmpTransport {
 	constructor(options: OmpProcessOptions) {
 		this.#logger = options.logger;
 		const win = process.platform === "win32";
-		const [file, args, verbatim] = launchCommand(options.executable, [...(options.mode ?? ["--mode", "rpc-ui"]), ...options.args], win);
+		const [file, args, verbatim] = launchCommand(options.executable, [...(options.mode ?? ["--mode", "rpc-ui"]), ...options.args], options.cwd, win);
 		this.#child = spawn(file, args, {
 			cwd: options.cwd,
 			env: options.env ?? process.env,
@@ -211,7 +212,7 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals, logger: Log
 	if (process.platform === "win32") {
 		const done = deferred<void>();
 		const command = `taskkill /pid ${pid} /T /F`;
-		const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+		const killer = spawn(systemProgram("taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
 		const stderr: Buffer[] = [];
 		killer.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
 		killer.on("error", error => {
@@ -234,19 +235,32 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals, logger: Log
 	return Promise.resolve();
 }
 
+/** A program in the Windows system directory, by full path: a bare name is looked up in the working directory first. */
+function systemProgram(name: string): string {
+	return path.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", name);
+}
+
 /** cmd.exe metacharacters; `^` makes the next one literal. */
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+/** A UNC path (`\\server\share\…`), which cmd.exe cannot use as its working directory. */
+const UNC_PATH = /^[\\/]{2}/;
 
 /**
  * Windows runs `.cmd`/`.bat` launchers (npm installs `omp.cmd`) only through
  * cmd.exe, which re-parses the command line, so the path and every argument
  * are quoted and caret-escaped. Arguments are escaped twice because the
- * launcher re-parses them again when it expands `%*`.
+ * launcher re-parses them again when it expands `%*`. cmd.exe replaces a UNC
+ * working directory with the Windows directory, so such a launch throws.
  */
-function launchCommand(executable: string, args: string[], win: boolean): [string, string[], boolean] {
+function launchCommand(executable: string, args: string[], cwd: string, win: boolean): [string, string[], boolean] {
 	if (!win || !/\.(cmd|bat)$/i.test(executable)) return [executable, args, false];
+	if (UNC_PATH.test(cwd)) {
+		throw new Error(
+			`${path.win32.basename(executable)} runs through cmd.exe, which cannot run in the UNC folder ${cwd}; set omp.executablePath to omp.exe`,
+		);
+	}
 	const line = [executable.replace(CMD_META, "^$1"), ...args.map(cmdArgument)].join(" ");
-	return [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `"${line}"`], true];
+	return [process.env.ComSpec ?? systemProgram("cmd.exe"), ["/d", "/s", "/c", `"${line}"`], true];
 }
 
 function cmdArgument(arg: string): string {

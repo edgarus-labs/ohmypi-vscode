@@ -49,6 +49,20 @@ describe("InteractionsView", () => {
 		assert.deepEqual(posted, [{ type: "respond", id: "c1", response: { kind: "confirmed", confirmed: true } }]);
 	});
 
+	it("returns focus to the composer when the question the user is on goes away", () => {
+		view.add({ request: { id: "c1", kind: "confirm", title: "Proceed?" } });
+		assert.equal(document.activeElement?.textContent, "Approve");
+		view.remove("c1");
+		assert.equal(composerFocusCalls, 1);
+	});
+
+	it("leaves focus alone when a question the user is not on goes away", () => {
+		composerFocused = true;
+		view.add({ request: { id: "c1", kind: "confirm", title: "Proceed?" } });
+		view.remove("c1");
+		assert.equal(composerFocusCalls, 0);
+	});
+
 	it("submits a question's free-text answer on Enter", () => {
 		view.add({ request: { id: "q1", kind: "ask", questions: [{ id: "color", question: "Which color?", options: [{ label: "red" }] }] } });
 		const other = view.element.querySelector<HTMLInputElement>('input[placeholder="Other…"]');
@@ -88,6 +102,17 @@ describe("InteractionsView", () => {
 			[false, true, "teal"],
 		);
 		assert.equal(view.element.querySelectorAll(".interaction").length, 1);
+	});
+
+	it("keeps focus on the control the user was on when the same question is shown again", () => {
+		const pending: PendingInteraction = { request: { id: "i1", kind: "input", title: "Name?" } };
+		view.add(pending);
+		const cancel = () => [...view.element.querySelectorAll("button")].find(button => button.textContent === "Cancel");
+		const before = cancel();
+		before?.focus();
+		view.add(pending);
+		assert.ok(cancel() !== before);
+		assert.ok(cancel() && document.activeElement === cancel());
 	});
 
 	it("drops the countdown when the question is shown again without a timeout", () => {

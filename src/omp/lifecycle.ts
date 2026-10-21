@@ -121,11 +121,15 @@ export class ProcessLifecycle {
 		return new Error(`OMP is not running (${this.#connection.state})`);
 	}
 
-	/** Launches OMP; clears a pending automatic restart. Throws while OMP is already running. */
+	/**
+	 * Launches OMP; clears a pending automatic restart, including one that a restart attempt failing
+	 * ahead of this start schedules. Throws while OMP is already running.
+	 */
 	start(binding: SessionBinding): Promise<void> {
 		this.#cancelRestart();
 		const epoch = this.#epoch;
 		return this.#serialize(async () => {
+			this.#cancelRestart();
 			if (this.#client) throw new Error("OMP is already running");
 			await this.#startReporting(binding, epoch);
 		});

@@ -69,8 +69,9 @@ interface ReportedLimit {
 /**
  * Renames the limits whose quota bucket `json` (the output of `omp usage --json`) names. OMP's text labels
  * every Antigravity Gemini bucket "Gemini"; the JSON carries the bucket in each limit's id
- * (`…:gemini-argon-wtu-weekly`). Each text limit is paired with the first unused JSON limit of the same
- * provider, name and used share. Every other limit, and every limit when the JSON is unusable, keeps its name.
+ * (`…:gemini-argon-wtu-weekly`). A text limit takes the name of the unused JSON limits of the same provider,
+ * name and used share only when they all name the same bucket; when several buckets could be it, and for
+ * every limit when the JSON is unusable, it keeps its name.
  */
 export function qualifyUsageBuckets(providers: readonly ProviderUsage[], json: string): void {
 	const reported = readReport(json);
@@ -80,10 +81,11 @@ export function qualifyUsageBuckets(providers: readonly ProviderUsage[], json: s
 		if (!candidates) continue;
 		const taken = new Set<ReportedLimit>();
 		for (const limit of provider.limits) {
-			const match = candidates.find(
+			const matches = candidates.filter(
 				candidate => !taken.has(candidate) && candidate.name === limit.name && Math.abs(candidate.usedPercent - limit.usedPercent) <= USED_TOLERANCE,
 			);
-			if (!match) continue;
+			const [match] = matches;
+			if (!match || matches.some(other => other.qualifiedName !== match.qualifiedName)) continue;
 			taken.add(match);
 			limit.name = match.qualifiedName;
 		}

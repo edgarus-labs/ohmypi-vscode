@@ -17,13 +17,26 @@ const DEFAULT_DIAGNOSTICS = 100;
 const DEFAULT_COMMANDS = 50;
 const RESUME_WAIT_MS = 30_000;
 const PAUSE_WAIT_MS = 30_000;
+/** How long `stop` waits for the debug sessions to end. */
+const STOP_WAIT_MS = 10_000;
 /** How long `start` waits for the debuggee to stop (stop on entry, an early breakpoint) once it launched. */
 const START_GRACE_MS = 3_000;
 const MAX_STACK_FRAMES = 100;
 const MAX_LOCALS = 500;
 /** `vscode.DiagnosticSeverity` values in order. */
 const SEVERITY_NAMES: readonly format.Severity[] = ["error", "warning", "info", "hint"];
-const RESUME_REQUESTS: Record<ResumeAction, string> = { continue: "continue", step_into: "stepIn", step_over: "next", step_out: "stepOut" };
+/**
+ * The workbench commands that resume a thread. They tell VS Code's debug views that the debuggee runs again;
+ * a bare `continue` or `next` request through `customRequest` leaves them showing the old stop.
+ */
+const RESUME_COMMANDS: Record<ResumeAction, string> = {
+	continue: "workbench.action.debug.continue",
+	step_into: "workbench.action.debug.stepInto",
+	step_over: "workbench.action.debug.stepOver",
+	step_out: "workbench.action.debug.stepOut",
+};
+/** The key of a launch configuration's overrides for this platform, which VS Code applies to the named ones it starts. */
+const PLATFORM_KEY = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "osx" : "linux";
 
 function displayPath(uri: vscode.Uri): string {
 	return uri.scheme === "file" ? uri.fsPath : uri.toString();
@@ -75,18 +88,37 @@ function diagnosticItems(entries: ReadonlyArray<readonly [vscode.Uri, readonly v
 	);
 }
 
-function taskLabel(task: vscode.Task): string {
-	return `${task.source}: ${task.name}`;
+/** Where a task is defined: its folder, `user` or `workspace`. */
+function scopeName(task: vscode.Task): string {
+	if (typeof task.scope === "object") return task.scope.name;
+	return task.scope === vscode.TaskScope.Global ? "user" : "workspace";
 }
 
-/** The task whose label is `name`, else the only task named `name`. */
-function findTask(tasks: readonly vscode.Task[], name: string): vscode.Task {
-	const byLabel = tasks.find(task => taskLabel(task) === name);
-	if (byLabel) return byLabel;
-	const byName = tasks.filter(task => task.name === name);
-	if (byName.length === 1) return byName[0];
-	if (byName.length > 1) throw new Error(`Several tasks are named '${name}': ${byName.map(taskLabel).join(", ")}; pass the label.`);
+/**
+ * Each task with its label, `<source>: <name>` as VS Code shows it. VS Code gives every tasks.json task the
+ * source `Workspace`, so a label several tasks share is followed by where each is defined, e.g. `(frontend)`.
+ */
+function labelTasks(tasks: readonly vscode.Task[]): Array<{ task: vscode.Task; label: string }> {
+	const base = (task: vscode.Task) => `${task.source}: ${task.name}`;
+	const counts = new Map<string, number>();
+	for (const task of tasks) counts.set(base(task), (counts.get(base(task)) ?? 0) + 1);
+	return tasks.map(task => ({ task, label: (counts.get(base(task)) ?? 0) > 1 ? `${base(task)} (${scopeName(task)})` : base(task) }));
+}
+
+/** The task labelled `name`, else the one task whose label without its `(…)` suffix, or else whose name, is `name`; with its label. */
+function findTask(tasks: readonly vscode.Task[], name: string): { task: vscode.Task; label: string } {
+	const labelled = labelTasks(tasks);
+	const byLabel = labelled.filter(entry => entry.label === name);
+	const bySourceAndName = labelled.filter(entry => `${entry.task.source}: ${entry.task.name}` === name);
+	const matches = byLabel.length > 0 ? byLabel : bySourceAndName.length > 0 ? bySourceAndName : labelled.filter(entry => entry.task.name === name);
+	if (matches.length === 1) return matches[0];
+	if (matches.length > 1) throw new Error(`Several tasks are named '${name}': ${matches.map(entry => entry.label).join(", ")}; pass the label.`);
 	throw new Error(`No task named '${name}'. Use vscode_tasks with action list to see the tasks.`);
+}
+
+/** The entry named `name` of a list from the `launch` settings. */
+function namedEntry(list: unknown, name: string): Record<string, unknown> | undefined {
+	return Array.isArray(list) ? list.find((entry): entry is Record<string, unknown> => isRecord(entry) && entry.name === name) : undefined;
 }
 
 /** The records in array `key` of a DAP response body; anything else in it is ignored. */
@@ -295,10 +327,10 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 		const name = action === "run" ? args.requiredString("name") : undefined;
 		const tasks = await vscode.tasks.fetchTasks();
 		if (name === undefined) {
-			return format.tasks(tasks.map(task => ({ label: taskLabel(task), group: task.group?.id, isBackground: task.isBackground })));
+			return format.tasks(labelTasks(tasks).map(({ task, label }) => ({ label, group: task.group?.id, isBackground: task.isBackground })));
 		}
-		const task = findTask(tasks, name);
-		const label = taskLabel(task);
+		const { task, label } = findTask(tasks, name);
+		signal.throwIfAborted();
 		if (task.isBackground) {
 			await vscode.tasks.executeTask(task);
 			return `Started background task ${label}; it keeps running.`;
@@ -321,8 +353,12 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 			const execution = await vscode.tasks.executeTask(task);
 			await new Promise<void>((resolve, reject) => {
 				check = () => {
-					if (signal.aborted) reject(signal.reason);
-					else if (exitCodes.has(execution) || ended.has(execution)) resolve();
+					const done = exitCodes.has(execution) || ended.has(execution);
+					if (signal.aborted) {
+						check = () => {};
+						if (!done) execution.terminate();
+						reject(signal.reason);
+					} else if (done) resolve();
 				};
 				signal.addEventListener("abort", onAbort, { once: true });
 				check();
@@ -341,9 +377,12 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 				return this.#debuggerState();
 			case "start":
 				return this.#startDebugging(args.optionalString("configuration"), args.optionalBool("noDebug") ?? false, signal);
-			case "stop":
-				if (vscode.debug.activeDebugSession) await vscode.debug.stopDebugging();
-				return this.#debuggerState();
+			case "stop": {
+				const active = vscode.debug.activeDebugSession;
+				if (!active) return this.#debuggerState();
+				const ended = await this.#debug.endAfter(() => vscode.debug.stopDebugging(), STOP_WAIT_MS, signal, [active.id]);
+				return ended ? "Debugger: not running." : this.#debuggerState();
+			}
 			case "pause": {
 				const session = vscode.debug.activeDebugSession;
 				if (!session) throw new Error("No debug session is running. Use vscode_debug with action start first.");
@@ -368,8 +407,11 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 			async () => {
 				if (configuration === undefined) {
 					await vscode.commands.executeCommand(noDebug ? "workbench.action.debug.run" : "workbench.action.debug.start");
-				} else if (!(await vscode.debug.startDebugging(this.#launchFolder(configuration), configuration, { noDebug }))) {
-					throw new Error(`VS Code could not start the launch configuration '${configuration}'.`);
+				} else {
+					const target = this.#launchTarget(configuration);
+					if (!(await vscode.debug.startDebugging(target.folder, target.configuration, { noDebug }))) {
+						throw new Error(`VS Code could not start the launch configuration '${configuration}'.`);
+					}
 				}
 			},
 			START_GRACE_MS,
@@ -378,15 +420,36 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 		return this.#describeOutcome(outcome, START_GRACE_MS);
 	}
 
-	/** The workspace folder whose launch settings define `configuration`, else the first folder. */
-	#launchFolder(configuration: string): vscode.WorkspaceFolder | undefined {
+	/**
+	 * How to start launch configuration `name`. VS Code looks a name up only in the launch.json of the folder it
+	 * is given, so one from the workspace file or user settings starts as its configuration, without a folder,
+	 * as VS Code starts those itself. A name nothing defines goes to the first folder, and VS Code reports it.
+	 */
+	#launchTarget(name: string): { folder: vscode.WorkspaceFolder | undefined; configuration: string | vscode.DebugConfiguration } {
 		const folders = vscode.workspace.workspaceFolders ?? [];
-		const defines = (folder: vscode.WorkspaceFolder) => {
-			const launch = vscode.workspace.getConfiguration("launch", folder.uri);
-			const entries = [...(launch.get<unknown[]>("configurations") ?? []), ...(launch.get<unknown[]>("compounds") ?? [])];
-			return entries.some(entry => isRecord(entry) && entry.name === configuration);
-		};
-		return folders.find(defines) ?? folders[0];
+		const folder = folders.find(candidate => {
+			const launch = vscode.workspace.getConfiguration("launch", candidate.uri);
+			return namedEntry(launch.inspect("configurations")?.workspaceFolderValue, name) ?? namedEntry(launch.inspect("compounds")?.workspaceFolderValue, name);
+		});
+		if (folder) return { folder, configuration: name };
+		const launch = vscode.workspace.getConfiguration("launch");
+		const levels = [
+			["workspaceValue", "workspace file"],
+			["globalValue", "user settings"],
+		] as const;
+		for (const [level, where] of levels) {
+			const configuration = namedEntry(launch.inspect("configurations")?.[level], name);
+			if (configuration) {
+				const overrides = configuration[PLATFORM_KEY];
+				return { folder: undefined, configuration: { ...configuration, ...(isRecord(overrides) ? overrides : {}) } as vscode.DebugConfiguration };
+			}
+			if (namedEntry(launch.inspect("compounds")?.[level], name)) {
+				throw new Error(
+					`'${name}' is a compound launch configuration in the ${where}; VS Code lets extensions start compounds only from a folder's launch.json. Start it from the Run and Debug view.`,
+				);
+			}
+		}
+		return { folder: folders[0], configuration: name };
 	}
 
 	async #resume(action: ResumeAction, signal: AbortSignal): Promise<string> {
@@ -399,8 +462,10 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 			);
 		}
 		const threadId = await this.#threadId(target.session, target.stop);
+		// The workbench commands find the thread by VS Code's debug model id for it.
+		const context = { sessionId: target.session.id, threadId: `thread:${target.session.id}:${threadId}` };
 		const outcome = await this.#debug.waitAfter(
-			() => target.session.customRequest(RESUME_REQUESTS[action], { threadId }),
+			() => vscode.commands.executeCommand(RESUME_COMMANDS[action], undefined, context),
 			RESUME_WAIT_MS,
 			signal,
 			target.session.id,

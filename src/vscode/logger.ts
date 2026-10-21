@@ -5,7 +5,10 @@ import { describeError } from "../shared/errors";
 type Level = "error" | "warn" | "info" | "debug";
 const RANK: Record<Level, number> = { error: 0, warn: 1, info: 2, debug: 3 };
 
-/** Output-channel logger filtered by `omp.logLevel`; `traceEnabled` follows `omp.traceRpc`. Both settings are read on every use. */
+/**
+ * Output-channel logger filtered by `omp.logLevel`; `traceEnabled` follows `omp.traceRpc`. Both settings are read on every use.
+ * Logging never throws: VS Code closes the channel while deactivation still stops OMP, and a line written after that is dropped.
+ */
 export class OutputLogger implements Logger {
 	constructor(private readonly channel: vscode.OutputChannel) {}
 
@@ -17,7 +20,15 @@ export class OutputLogger implements Logger {
 		const configured = vscode.workspace.getConfiguration("omp").get<Level>("logLevel", "info");
 		if (RANK[level] > (RANK[configured] ?? RANK.info)) return;
 		const text = error === undefined ? message : `${message}: ${describeError(error)}`;
-		this.channel.appendLine(`${new Date().toISOString()} [${level}] ${text}`);
+		this.append(`${new Date().toISOString()} [${level}] ${text}`);
+	}
+
+	private append(line: string): void {
+		try {
+			this.channel.appendLine(line);
+		} catch {
+			// The channel is closed; the line has nowhere to go.
+		}
 	}
 
 	error(message: string, error?: unknown): void {
@@ -37,6 +48,6 @@ export class OutputLogger implements Logger {
 	}
 
 	trace(direction: "in" | "out", frame: string): void {
-		this.channel.appendLine(`${new Date().toISOString()} [trace] ${direction === "in" ? "<-" : "->"} ${frame}`);
+		this.append(`${new Date().toISOString()} [trace] ${direction === "in" ? "<-" : "->"} ${frame}`);
 	}
 }

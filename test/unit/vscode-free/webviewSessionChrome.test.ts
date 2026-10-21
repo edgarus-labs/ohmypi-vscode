@@ -132,6 +132,56 @@ describe("webview session chrome", () => {
 			app.handle({ type: "connection", connection: { state: "ready" } });
 			assert.ok(!recent()?.classList.contains("hidden"));
 		});
+
+		it("keeps keyboard focus on a recent session while the list refreshes", () => {
+			app.handle(reset());
+			const sessions = [
+				{ path: "/s/a.jsonl", title: "a", modified: 1 },
+				{ path: "/s/b.jsonl", title: "b", modified: 2 },
+			];
+			app.handle({ type: "recentSessions", sessions, total: 2 });
+			const row = () => [...root.querySelectorAll<HTMLButtonElement>(".recent-row")].find(button => button.title === "b");
+			row()?.focus();
+			app.handle({ type: "session", session: session({}) });
+			assert.ok(row() && document.activeElement === row());
+			app.handle({ type: "recentSessions", sessions: [{ path: "/s/c.jsonl", title: "c", modified: 3 }, ...sessions], total: 3 });
+			assert.deepEqual(
+				[...root.querySelectorAll(".recent-row .recent-title")].map(title => title.textContent),
+				["c", "a", "b"],
+			);
+			assert.ok(row() && document.activeElement === row());
+			click(row());
+			assert.deepEqual(api.postedOf("openSession"), [{ type: "openSession", path: "/s/b.jsonl" }]);
+		});
+
+		it("keeps keyboard focus on Start OMP while the welcome follows updates", () => {
+			app.handle(reset({ connection: { state: "stopped" } }));
+			const start = root.querySelector<HTMLButtonElement>(".empty button.start-omp");
+			start?.focus();
+			app.handle({ type: "session", session: session({}) });
+			app.handle({ type: "recentSessions", sessions: [], total: 0 });
+			assert.ok(start && document.activeElement === start);
+		});
+	});
+
+	describe("focus across updates", () => {
+		it("keeps keyboard focus on Resume auto while statuses update", () => {
+			const resume = () => root.querySelector<HTMLButtonElement>(".header button.resume-tier");
+			app.handle(reset({ statuses: [{ key: "tier", text: PAUSED }] }));
+			resume()?.focus();
+			app.handle({ type: "statuses", statuses: [{ key: "tier", text: PAUSED }, { key: "lsp", text: "indexing" }] });
+			assert.ok(resume() && document.activeElement === resume());
+		});
+
+		it("keeps keyboard focus on the unavailable banner's buttons across resets", () => {
+			app.handle(reset({ unavailable: "omp not found on PATH" }));
+			const settings = () => [...root.querySelectorAll<HTMLButtonElement>(".banner button")].find(button => button.textContent === "Open Settings");
+			settings()?.focus();
+			app.handle(reset({ unavailable: "omp not found on PATH" }));
+			assert.ok(settings() && document.activeElement === settings());
+			app.handle(reset({ unavailable: "omp exited" }));
+			assert.equal(root.querySelector(".banner-text")?.textContent, "OMP not found: omp exited");
+		});
 	});
 
 	describe("statuses", () => {

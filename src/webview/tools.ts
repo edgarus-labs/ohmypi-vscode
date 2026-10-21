@@ -3,7 +3,7 @@ import { errorMessage } from "../shared/errors";
 import { formatDuration } from "../shared/format";
 import { isRecord } from "../shared/guards";
 import { toolArgPaths, toolResultFiles } from "../shared/toolFiles";
-import { codeBlock, diffView, linkButton, proseBlock, type RowView } from "./codeBlock";
+import { codeBlock, diffView, proseBlock, type RowView, toggleButton } from "./codeBlock";
 import type { RenderContext } from "./context";
 import { type Child, h } from "./dom";
 import { guessLanguage } from "./highlight";
@@ -204,8 +204,9 @@ function errorLine(result: ToolResultView | undefined): string | undefined {
 }
 
 /**
- * Rewrites paths under `cwd` as relative paths. A Windows `cwd` (drive letter or backslashes) matches either
- * separator and any letter case; a POSIX one matches exactly.
+ * Rewrites paths under `cwd` as relative paths; the directory itself, with nothing of a path after its separator,
+ * stays whole. A Windows `cwd` (drive letter or backslashes) matches either separator and any letter case; a POSIX
+ * one matches exactly.
  */
 function relativeTo(text: string, cwd: string | undefined): string {
 	if (!cwd) return text;
@@ -213,7 +214,7 @@ function relativeTo(text: string, cwd: string | undefined): string {
 	const separator = windows ? String.raw`[\\/]` : "/";
 	const parts = cwd.replace(/[\\/]+$/, "").split(windows ? /[\\/]/ : "/");
 	const root = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(separator) + separator;
-	return text.replace(new RegExp(`(^|[\\s"'(])${root}`, windows ? "gi" : "g"), "$1");
+	return text.replace(new RegExp(`(^|[\\s"'(])${root}(?=[^\\s"'\`();&|<>])`, windows ? "gi" : "g"), "$1");
 }
 
 /** Label of a file link: the path relative to `cwd` when inside it, plus `:line`. */
@@ -246,7 +247,7 @@ export function toolHeadline(item: ToolItem, cwd?: string): ToolHeadline {
 		}
 		const exit = kind === "shell" ? exitCodeOf(item.result) : undefined;
 		if (exit !== undefined) parts.push(`exit ${exit}`);
-		if (item.name === "write" && isRecord(item.args) && typeof item.args.content === "string") parts.push(plural(item.args.content.split("\n").length, "line"));
+		if (item.name === "write" && isRecord(item.args) && typeof item.args.content === "string") parts.push(plural(item.args.content.replace(/\r?\n$/, "").split("\n").length, "line"));
 		if (state === "background") parts.splice(0, parts.length, "in background");
 		else if (item.endedAt !== undefined && item.startedAt > 0 && item.endedAt >= item.startedAt) parts.push(formatDuration(item.endedAt - item.startedAt));
 		const primary = relativeTo(primaryArg(item, kind), cwd);
@@ -401,13 +402,66 @@ export function rendersMarkdown(item: ToolItem): boolean {
 	return (kind === "mcp" || kind === "generic") && looksLikeMarkdown(text);
 }
 
-/** A group holding a quantifier that is itself repeated (`(a+)+`, `(\w*)*`): JavaScript regexes can backtrack on it without bound. */
-const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,\d*\})\)(?:[+*]|\{\d+,\d*\})/;
+/** Longest pattern compiled as a regex. */
+const MAX_REGEX_PATTERN = 100;
+/** A quantifier at the start of the rest of a pattern: `*`, `+`, `?` or `{n}`, `{n,}`, `{n,m}`, lazy or not. */
+const QUANTIFIER = /(?:[*+?]|\{(\d+)(?:(,)(\d*))?\})\??/y;
+/** What follows the `(` of a non-capturing group, a lookaround or a named group. */
+const GROUP_PREFIX = /\?(?:[:=!]|<[=!]|<[^>]*>)/y;
+
+/**
+ * Whether a backtracking regex for `pattern` does a bounded amount of work at each position of a line: a pattern of
+ * at most {@link MAX_REGEX_PATTERN} characters without backreferences, without a quantified group, with alternation
+ * only at its top level, and with at most one repeating quantifier (`*`, `+`, `{n,}`, `{n,m}` or `{n}` past one)
+ * and two optional ones (`?`, `{0,1}`). Characters inside a `[...]` class and escaped ones count as literal.
+ */
+function backtracksBoundedly(pattern: string): boolean {
+	if (pattern.length > MAX_REGEX_PATTERN) return false;
+	let repeating = 0;
+	let optional = 0;
+	let depth = 0;
+	let closedGroup = false;
+	let i = 0;
+	while (i < pattern.length) {
+		const char = pattern[i];
+		QUANTIFIER.lastIndex = i;
+		const quantifier = QUANTIFIER.exec(pattern);
+		if (quantifier) {
+			if (closedGroup) return false;
+			const [text, count, comma, upper] = quantifier;
+			const min = count === undefined ? (char === "+" ? 1 : 0) : Number(count);
+			const max = count === undefined ? (char === "?" ? 1 : Infinity) : comma === undefined ? min : upper ? Number(upper) : Infinity;
+			if (max > 1) repeating++;
+			else if (min < max) optional++;
+			if (repeating > 1 || optional > 2) return false;
+			i += text.length;
+			continue;
+		}
+		closedGroup = char === ")";
+		if (char === "\\") {
+			if (/[1-9k]/.test(pattern[i + 1] ?? "")) return false;
+			i += 2;
+		} else if (char === "[") {
+			i += pattern[i + 1] === "^" ? 2 : 1;
+			while (i < pattern.length && pattern[i] !== "]") i += pattern[i] === "\\" ? 2 : 1;
+			i++;
+		} else if (char === "(") {
+			depth++;
+			GROUP_PREFIX.lastIndex = i + 1;
+			i += 1 + (GROUP_PREFIX.exec(pattern)?.[0].length ?? 0);
+		} else {
+			if (char === ")") depth = Math.max(0, depth - 1);
+			else if (char === "|" && depth > 0) return false;
+			i++;
+		}
+	}
+	return true;
+}
 
 /**
  * What a search call looked for, to mark in its result: its pattern as a regex, or as literal text when it is not a
- * valid one or could backtrack without bound, ignoring case when the call sets `case` to false; `undefined` for other
- * tools or a call without a pattern.
+ * valid one or its backtracking could outgrow the text (see {@link backtracksBoundedly}), ignoring case when the call
+ * sets `case` to false; `undefined` for other tools or a call without a pattern.
  */
 export function searchPattern(item: ToolItem): RegExp | undefined {
 	if (pickRenderer(item.name) !== "search") return undefined;
@@ -416,7 +470,7 @@ export function searchPattern(item: ToolItem): RegExp | undefined {
 	if (!pattern) return undefined;
 	const ignoreCase = args.case === false ? "i" : "";
 	const literal = () => new RegExp(pattern.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"), `g${ignoreCase}`);
-	if (NESTED_QUANTIFIER.test(pattern)) return literal();
+	if (!backtracksBoundedly(pattern)) return literal();
 	try {
 		return new RegExp(pattern, `gm${ignoreCase}`);
 	} catch {
@@ -488,7 +542,7 @@ function labeled(label: string, content: HTMLElement | null): HTMLElement | null
 function argsSection(item: ToolItem, row: RowView): HTMLElement | null {
 	const args = item.args;
 	if (args === undefined || args === null || (typeof args === "object" && Object.keys(args).length === 0)) return null;
-	return labeled("IN", codeBlock(row, flatArgs(args), { copy: indentedJson(args), language: "yaml", className: "quiet" }));
+	return labeled("IN", codeBlock(row, "in", flatArgs(args), { copy: indentedJson(args), language: "yaml", className: "quiet" }));
 }
 
 function outputSection(item: ToolItem, row: RowView, shell = false): HTMLElement | null {
@@ -497,11 +551,11 @@ function outputSection(item: ToolItem, row: RowView, shell = false): HTMLElement
 		case undefined:
 			return null;
 		case "diff":
-			return labeled("OUT", diffView(row, `${item.id}:out:more`, view.text));
+			return labeled("OUT", diffView(row, "out", `${item.id}:out:more`, view.text));
 		case "markdown":
-			return labeled("OUT", proseBlock(row, view.source));
+			return labeled("OUT", proseBlock(row, "out", view.source));
 		case "code":
-			return labeled("OUT", codeBlock(row, view.shown, { copy: view.copy, language: view.language, mark: view.mark }));
+			return labeled("OUT", codeBlock(row, "out", view.shown, { copy: view.copy, language: view.language, mark: view.mark }));
 	}
 }
 
@@ -531,7 +585,7 @@ const fileBody: Body = (item, row) => {
 	);
 	return [
 		actionsLine(...links),
-		diff ? diffView(row, `${item.id}:diff:more`, diff) : null,
+		diff ? diffView(row, "diff", `${item.id}:diff:more`, diff) : null,
 		item.name !== "read" && !diff ? argsSection(item, row) : null,
 		item.name === "read" || item.result?.isError || !diff ? outputSection(item, row) : null,
 	];
@@ -539,8 +593,8 @@ const fileBody: Body = (item, row) => {
 
 const shellBody: Body = (item, row) => {
 	const input = shellInput(item);
-	const command = input?.command ? codeBlock(row, input.command.text, { language: input.command.language, className: "quiet" }) : null;
-	const parameters = input?.parameters ? codeBlock(row, input.parameters, { language: "yaml", className: "quiet parameters" }) : null;
+	const command = input?.command ? codeBlock(row, "command", input.command.text, { language: input.command.language, className: "quiet" }) : null;
+	const parameters = input?.parameters ? codeBlock(row, "parameters", input.parameters, { language: "yaml", className: "quiet parameters" }) : null;
 	return [command || parameters ? labeled("IN", h("div", { class: "tool-input" }, command, parameters)) : null, outputSection(item, row, true)];
 };
 
@@ -614,23 +668,21 @@ export function renderTool(item: ToolItem, ctx: RenderContext): HTMLElement {
 	const key = `${item.id}:open`;
 	const expanded = ctx.isOpen(key) === true;
 	const headerOnly = item.name === "read" && head.state === "done";
-	const refresh = (from: Element) => {
+	const refresh = (from: Element, focus?: string) => {
 		const live = from.closest<HTMLElement>(".tool");
 		if (!live) return;
 		const fresh = renderTool(item, ctx);
 		live.classList.toggle("expanded", fresh.classList.contains("expanded"));
 		live.replaceChildren(...fresh.childNodes);
-		return live;
+		if (focus) live.querySelector<HTMLElement>(`[data-action="${focus}"]`)?.focus();
 	};
 	const row: RowView = {
 		ctx,
 		expanded,
 		closesToHeader: headerOnly,
-		setExpanded: (from, open) => {
+		setExpanded: (from, open, focus) => {
 			ctx.setOpen(key, open);
-			refresh(from)
-				?.querySelector<HTMLElement>(`[data-action="${open ? "collapse" : "more"}"]`)
-				?.focus();
+			refresh(from, focus);
 		},
 		refresh,
 	};
@@ -656,9 +708,7 @@ export function renderTool(item: ToolItem, ctx: RenderContext): HTMLElement {
 			h(
 				"div",
 				{ class: "tool-more" },
-				expanded
-					? linkButton("collapse", button => row.setExpanded(button, false), "collapse")
-					: linkButton(`show more (${plural(lines, "line")})`, button => row.setExpanded(button, true), "more"),
+				expanded ? toggleButton("collapse", "row", false, row.setExpanded) : toggleButton(`show more (${plural(lines, "line")})`, "row", true, row.setExpanded),
 			),
 		);
 	}

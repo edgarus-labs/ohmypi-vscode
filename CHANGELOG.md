@@ -38,6 +38,28 @@
 - Fixed: short panels keep the input box visible; high-contrast themes show hover outlines; light themes get readable warning text; long text in questions wraps.
 - `omp.executablePath` and `omp.extraArgs` now have machine scope: a repository's `.vscode/settings.json` can no longer choose which executable runs or with which arguments (for example `--approval-mode`). Set them in your user settings, or the remote machine's settings. Workspace-level values are ignored.
 - The message meta line (model of a reply) is shown in the muted color at full opacity instead of dimmed, for readable contrast.
+- Fixed: closing or reloading the window while OMP was slow to exit could leave OMP running, because writing to the already closed log stopped the shutdown before OMP was killed. The log stays open until OMP has stopped, and logging never interrupts the shutdown.
+- Fixed: with no folder open, OMP ran in the folder of the file that was active when the extension started instead of the one active when OMP first starts.
+- Fixed: when OMP could not be used, prompts and commands always said "OMP executable not found" instead of the actual reason (for example invalid `omp.extraArgs`); after the extension stopped OMP they say so.
+- Fixed: pasted and dropped images showed a broken preview in the composer.
+- Fixed: keyboard focus was lost when the welcome's recent sessions refreshed (every minute and on session updates), when statuses updated while on **Resume auto**, on the unavailable banner's buttons at a reset, and when a focused question closed (it now returns to the composer).
+- Fixed: warnings and errors the chat shows itself (for example the images a reload did not keep) disappeared at the next refresh of the conversation; they now stay after it.
+- Fixed: a long paste after a reload got the same `Pasted text N` name as a pasted-text chip kept from before the reload.
+- Fixed: `vscode_debug` continuing or stepping left VS Code's debug view showing the old stop (stop line, call stack, Continue button) while the program ran; it now goes through VS Code's own Continue and Step commands. `stop` waits up to 10 s for the debug sessions to end instead of reporting the old stop.
+- Fixed: `vscode_debug start` with a launch configuration from a `.code-workspace` file or user settings failed with "Configuration is missing in launch.json"; such a configuration now starts (a compound from there cannot be started by name and says so).
+- Fixed: cancelling `vscode_tasks run` left the task running; it is now terminated, and not started at all when the cancel arrives first. Tasks that share a label (for example `Workspace: build` in two folders) are listed and run with their folder, `user` or `workspace` appended.
+- Documented that `vscode_execute_command` is not limited to the workspace: it runs any command, internal ones included, with any arguments.
+- Fixed: with `omp.cmd` (the npm install) and a workspace on a network or WSL share (`\\server\share\…`), OMP ran in `C:\Windows`, because cmd.exe cannot use such a folder. Starting OMP now fails with a message to point `omp.executablePath` at `omp.exe`.
+- Fixed: OMP's tree is ended with the `taskkill` from the Windows system folder, not one found first in the working directory or on `PATH`.
+- Fixed: output of a slash command sent while the usage popup loads, or still arriving from one sent just before, went into the usage report instead of the conversation; and usage that took over 30 s to load failed and printed the report into the conversation.
+- Fixed: the session list showed the editor context of a prompt (`<editor-context> workspace: …`) instead of what you typed.
+- Fixed: two usage limits of the same name at the same share (for example both at 0% after a reset) could swap their quota bucket names; such limits keep the name `/usage` gives.
+- Fixed: Diff on a tool call did nothing when OMP reported the file's path in another letter case, or when the file's earlier content came in a second result entry that names the file another way.
+- Fixed: token counts from 999,950 to 999,999 read `1000k` instead of `1M`.
+- Fixed: a grep, glob or ast_grep pattern such as `(\w+\s?)+:` or `(a|aa)+b` could freeze the chat panel while marking its matches, on every redraw and on reopening the session. Patterns whose matching could slow down on long text (quantified groups, backreferences, alternation inside a group, more than one repeating or two optional quantifiers, over 100 characters) are now marked as literal text, and matches are marked within the first 1000 columns of each line.
+- Fixed: the header of a `write` call counted a file's final newline as an extra line.
+- Fixed: a shell command's header dropped the working directory itself, so `rm -rf /home/u/proj/` read `rm -rf`; only paths below it are shortened.
+- Fixed: after **show more** or **collapse** in a tool call, focus went to the first such button in the row (or to the page, for a diff) instead of the other button of the same block. An open diff now has **collapse** too.
 
 ## 0.5.0
 

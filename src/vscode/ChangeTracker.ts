@@ -4,7 +4,7 @@ import type { Disposable, Logger, OmpServiceApi, ToolExecutionEvent, TranscriptI
 import { toolArgPaths, toolResultFiles } from "../shared/toolFiles";
 import { BASELINE_SCHEME, BaselineContentProvider, baselineUri, EMPTY_QUERY } from "./BaselineContentProvider";
 import { ChangeModel, type ChangeScope, type ReadSnapshot, readSnapshot, type TrackedChange } from "./changeModel";
-import { resolveToolPath } from "./changePaths";
+import { pathKey, resolveToolPath } from "./changePaths";
 import { changeRowDescription, changesSummary } from "./changeRows";
 import { confirmToolFile, workspaceRoots } from "./workspaceFiles";
 
@@ -119,7 +119,9 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 		if (!cwd) return false;
 		const wanted = file === undefined ? undefined : resolveToolPath(file, cwd);
 		if (file !== undefined && !wanted) return false;
-		const isWanted = (filePath: string | undefined): filePath is string => filePath !== undefined && (wanted === undefined || filePath === wanted);
+		const wantedKey = wanted === undefined ? undefined : pathKey(wanted);
+		const isWanted = (filePath: string | undefined): filePath is string =>
+			filePath !== undefined && (wantedKey === undefined || pathKey(filePath) === wantedKey);
 		const files = toolResultFiles(item.result?.details);
 		const candidates = [...files.map(entry => entry.path), ...toolArgPaths(item.args)].map(raw => resolveToolPath(raw, cwd)).filter(isWanted);
 		if (candidates.length === 0) return false;

@@ -99,12 +99,36 @@ describe("webview app", () => {
 		assert.equal(root.querySelectorAll(".interaction").length, 0);
 	});
 
-	it("keeps file and text attachments across a reload and names the images it could not keep", async () => {
+	it("leaves focus in the composer when a question arrives while the user types there", () => {
+		app.handle(reset());
+		const input = root.querySelector<HTMLTextAreaElement>("textarea.input");
+		input?.focus();
+		app.handle({ type: "interaction", pending: { request: { id: "c1", kind: "confirm", title: "Proceed?" } } });
+		assert.ok(input && document.activeElement === input);
+	});
+
+	it("focuses a question that arrives while the composer is not focused, and returns focus to the composer when it closes", () => {
+		app.handle(reset());
+		app.handle({ type: "interaction", pending: { request: { id: "c1", kind: "confirm", title: "Proceed?" } } });
+		assert.equal(document.activeElement?.textContent, "Approve");
+		app.handle({ type: "interactionClosed", id: "c1" });
+		const input = root.querySelector("textarea.input");
+		assert.ok(input && document.activeElement === input);
+		app.handle({ type: "interaction", pending: { request: { id: "c2", kind: "confirm", title: "Again?" } } });
+		[...root.querySelectorAll<HTMLButtonElement>(".interaction button")].find(button => button.textContent === "Deny")?.focus();
+		assert.equal(document.activeElement?.textContent, "Deny");
+		app.handle(reset());
+		assert.ok(document.activeElement === input);
+	});
+
+	it("keeps file and text attachments across a reload, keeps the notice naming the images it lost, and numbers new pastes after the kept ones", async () => {
 		app.handle(reset());
 		app.handle({ type: "addAttachments", attachments: [{ id: "f1", kind: "file", path: "/w/a.ts", label: "a.ts" }] });
 		const image = new File([new Uint8Array(4)], "shot.png", { type: "image/png" });
 		const long = "line\n".repeat(20);
-		root.querySelector("textarea.input")?.dispatchEvent(event("paste", { clipboardData: { files: [image], getData: (format: string) => (format === "text/plain" ? long : "") } }));
+		const paste = (files: File[]) =>
+			root.querySelector("textarea.input")?.dispatchEvent(event("paste", { clipboardData: { files, getData: (format: string) => (format === "text/plain" ? long : "") } }));
+		paste([image]);
 		await settle();
 		root.remove();
 		app = start();
@@ -114,8 +138,16 @@ describe("webview app", () => {
 			["chip file", "chip text"],
 		);
 		assert.match(root.querySelector(".item.notice")?.textContent ?? "", /shot\.png/);
-		app.handle(reset());
-		assert.equal(root.querySelectorAll(".item.notice").length, 0);
+		app.handle(reset({ items: [{ kind: "user", id: "u1", text: "hi" }] }));
+		assert.deepEqual(
+			[...root.querySelectorAll(".column > [data-id]")].map(item => item.getAttribute("data-id")),
+			["u1", "local-1"],
+		);
+		paste([]);
+		assert.deepEqual(
+			api.state?.attachments?.map(attachment => attachment.label),
+			["a.ts", "Pasted text 1", "Pasted text 2"],
+		);
 	});
 
 	it("clears the composer only after the host accepted the prompt", () => {

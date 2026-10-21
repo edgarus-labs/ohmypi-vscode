@@ -681,6 +681,34 @@ describe("OmpService against an in-memory OMP", () => {
 		omp.shutdownError = undefined;
 	});
 
+	it("start queued behind a failing automatic restart cancels the restart that failure schedules", async () => {
+		const spawned: MemoryOmp[] = [];
+		const service = new OmpService(
+			{ executable: "memory-omp", extraArgs: [], cwd: os.tmpdir(), logger: memoryLogger(), autoRestart: true },
+			{
+				spawn: () => {
+					const omp = spawned.length === 1 ? new MemoryOmp({ negotiate_protocol: () => NO_REPLY }) : new MemoryOmp();
+					spawned.push(omp);
+					return omp;
+				},
+				shutdownGraceMs: 50,
+				restartDelaysMs: [10, 10, 10],
+			},
+		);
+		services.push(service);
+		await service.start();
+		spawned[0].close(1);
+		await waitFor(() => spawned.length === 2, 1000, "automatic restart attempt");
+		const started = service.start();
+		spawned[1].close(1);
+		await started;
+		// Nothing signals a restart that does not happen; this outlasts the 10 ms delay of one that would.
+		await tick(100);
+		assert.equal(spawned.length, 3);
+		assert.equal(service.connection.pid, spawned[2].pid);
+		assert.equal(spawned[2].closed, false);
+	});
+
 	it("falls back to get_messages when message pages change while loading", async () => {
 		const history = [user("a"), user("b"), user("c"), user("d")];
 		let page = 0;
@@ -950,11 +978,11 @@ describe("OmpService against an in-memory OMP", () => {
 			});
 		}
 
-		function start(omp: MemoryOmp, usage: { stdout: string; code: number } = { stdout: BUCKETS, code: 0 }) {
+		function start(omp: MemoryOmp, usage: { stdout: string; code: number } = { stdout: BUCKETS, code: 0 }, requestTimeoutMs?: number) {
 			const logger = memoryLogger();
 			const runs: UsageRun[] = [];
 			const service = new OmpService(
-				{ executable: "memory-omp", extraArgs: [], cwd: os.tmpdir(), logger, autoRestart: false },
+				{ executable: "memory-omp", extraArgs: [], cwd: os.tmpdir(), logger, autoRestart: false, requestTimeoutMs },
 				{ spawn: options => (options.mode ? usageProcess(runs, options, usage.stdout, usage.code) : omp), shutdownGraceMs: 50 },
 			);
 			services.push(service);
@@ -1063,6 +1091,79 @@ describe("OmpService against an in-memory OMP", () => {
 			await waitFor(() => prompts.length === 2, 1000, "second /usage");
 			answer(prompts[1]);
 			assert.equal((await second).length, 1);
+		});
+
+		const outputs = (service: OmpService) => service.transcript.flatMap(item => (item.kind === "command_output" ? [item.text] : []));
+
+		it("sends a prompt given while /usage runs once /usage is answered, so its command output reaches the transcript", async () => {
+			const usagePrompts: Array<Record<string, unknown>> = [];
+			const omp = new MemoryOmp({
+				prompt: (frame, transport) => {
+					if (frame.message === "/usage") {
+						usagePrompts.push(frame);
+						return NO_REPLY;
+					}
+					transport.emit({ type: "command_output", text: "No rules" });
+					return { agentInvoked: false };
+				},
+			});
+			const { service } = start(omp);
+			await service.start();
+			const usage = service.getUsage();
+			await waitFor(() => usagePrompts.length === 1, 1000, "/usage");
+			const rules = service.prompt("/rules");
+			omp.emit({ type: "command_output", text: REPORT });
+			omp.reply(usagePrompts[0], { agentInvoked: false });
+			assert.equal((await usage).length, 1);
+			assert.equal((await rules).status, "local");
+			assert.deepEqual(omp.sent("prompt").map(frame => frame.message), ["/usage", "/rules"]);
+			assert.deepEqual(outputs(service), ["No rules"]);
+		});
+
+		it("sends /usage once the prompts sent before it are answered, so their command output reaches the transcript", async () => {
+			const prompts: Array<Record<string, unknown>> = [];
+			const omp = new MemoryOmp({
+				prompt: frame => {
+					prompts.push(frame);
+					return NO_REPLY;
+				},
+			});
+			const { service } = start(omp);
+			await service.start();
+			const rules = service.prompt("/rules");
+			await waitFor(() => prompts.length === 1, 1000, "/rules");
+			const usage = service.getUsage();
+			// Lets the usage request begin as far as it can before OMP answers /rules.
+			await tick();
+			omp.emit({ type: "command_output", text: "No rules" });
+			omp.reply(prompts[0], { agentInvoked: false });
+			await waitFor(() => prompts.length === 2, 1000, "/usage");
+			omp.emit({ type: "command_output", text: REPORT });
+			omp.reply(prompts[1], { agentInvoked: false });
+			assert.equal((await usage).length, 1);
+			assert.equal((await rules).status, "local");
+			assert.deepEqual(prompts.map(frame => frame.message), ["/rules", "/usage"]);
+			assert.deepEqual(outputs(service), ["No rules"]);
+		});
+
+		it("keeps capturing /usage output until OMP answers, however long that takes", async () => {
+			const prompts: Array<Record<string, unknown>> = [];
+			const omp = new MemoryOmp({
+				prompt: frame => {
+					prompts.push(frame);
+					return NO_REPLY;
+				},
+			});
+			const { service } = start(omp, undefined, 50);
+			await service.start();
+			const usage = service.getUsage();
+			await waitFor(() => prompts.length === 1, 1000, "/usage");
+			// Outlasts the 50 ms request timeout, which only a real wait can.
+			await tick(100);
+			omp.emit({ type: "command_output", text: REPORT });
+			omp.reply(prompts[0], { agentInvoked: false });
+			assert.equal((await usage).length, 1);
+			assert.deepEqual(service.transcript, []);
 		});
 
 		it("cancels every running or pending subagent on abort and logs the cancellations that fail", async () => {

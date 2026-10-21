@@ -24,7 +24,7 @@ export interface ServiceSupervisorOptions {
 }
 
 const RESTRICTED_MESSAGE = "OMP is disabled in Restricted Mode because it runs commands and edits files in this workspace. Trust the workspace to start OMP.";
-const NOT_FOUND_MESSAGE = "OMP executable not found. Configure omp.executablePath, then run OMP: Restart.";
+const STOPPED_MESSAGE = "OMP was stopped because the extension is shutting down.";
 
 /**
  * Owns the OMP service: creation from settings, start, restart, recreation and teardown.
@@ -40,6 +40,13 @@ export class ServiceSupervisor implements vscode.Disposable {
 	private readonly trustSubscription: vscode.Disposable;
 	/** Set by `shutdown()`/`dispose()`; no service is created afterwards. */
 	private disposed = false;
+	/** Why the last attempt to build the service failed; cleared once one is built. */
+	private unavailableReason: string | undefined;
+	/**
+	 * The service was built with no workspace folder open and has not started yet. Its working directory
+	 * comes from the editor active when it was built, so it is built again when OMP first starts.
+	 */
+	private builtAhead = false;
 
 	constructor(private readonly options: ServiceSupervisorOptions) {
 		void this.setContext("omp.busy", false);
@@ -57,6 +64,7 @@ export class ServiceSupervisor implements vscode.Disposable {
 	initialize(): void {
 		if (!this.createService()) return;
 		if (!vscode.workspace.workspaceFolders?.length) {
+			this.builtAhead = true;
 			this.options.logger.info("No workspace folder is open: OMP starts on the first command");
 			return;
 		}
@@ -69,8 +77,10 @@ export class ServiceSupervisor implements vscode.Disposable {
 	}
 
 	private createService(): boolean {
+		this.builtAhead = false;
 		if (this.disposed) return false;
 		if (!vscode.workspace.isTrusted) {
+			this.unavailableReason = RESTRICTED_MESSAGE;
 			this.options.logger.info(RESTRICTED_MESSAGE);
 			this.options.showUnavailable(RESTRICTED_MESSAGE);
 			return false;
@@ -82,6 +92,7 @@ export class ServiceSupervisor implements vscode.Disposable {
 			this.markUnavailable(errorMessage(error));
 			return false;
 		}
+		this.unavailableReason = undefined;
 		this.current = service;
 		this.subscriptions = [
 			service.onDidChangeSession(session => this.onSessionChanged(session)),
@@ -92,11 +103,23 @@ export class ServiceSupervisor implements vscode.Disposable {
 	}
 
 	private markUnavailable(message: string): void {
+		this.unavailableReason = message;
 		this.options.logger.error(`OMP not available: ${message}`);
 		this.options.showUnavailable(message);
 		void vscode.window.showErrorMessage(`oh-my-pi: ${message}`, "Open Settings").then(choice => {
 			if (choice === "Open Settings") return openOmpSettings();
 		});
+	}
+
+	/** Builds the service built ahead of its first start again, so OMP runs in the folder of the editor active now. */
+	private rebuildBuiltAhead(): void {
+		const stale = this.current;
+		this.current = undefined;
+		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions = [];
+		for (const consumer of this.options.consumers) consumer.setService(undefined);
+		stale?.dispose();
+		this.createService();
 	}
 
 	private onSessionChanged(session: SessionView): void {
@@ -141,7 +164,7 @@ export class ServiceSupervisor implements vscode.Disposable {
 
 	private start(options: SessionBinding | undefined): Promise<void> {
 		const service = this.current;
-		if (!service) return Promise.reject(new Error("OMP is not available"));
+		if (!service) return Promise.reject(new Error(this.unavailableMessage()));
 		return this.track(service.start(options));
 	}
 
@@ -155,14 +178,19 @@ export class ServiceSupervisor implements vscode.Disposable {
 
 	/**
 	 * The running service. Starts OMP when it is not running, with `options` or else the current (or last)
-	 * session; waits for a restart, recreation or automatic restart in progress.
+	 * session; waits for a restart, recreation or automatic restart in progress. A service built ahead of its
+	 * first start is replaced before this returns, so the consumers already hold the service OMP starts with.
 	 */
 	async ensureService(options?: SessionBinding): Promise<OmpServiceApi> {
 		for (;;) {
 			const service = this.current;
 			if (!service) {
-				if (!this.changing) throw new Error(vscode.workspace.isTrusted ? NOT_FOUND_MESSAGE : RESTRICTED_MESSAGE);
+				if (!this.changing) throw new Error(this.unavailableMessage());
 				await this.changing.catch(() => undefined);
+				continue;
+			}
+			if (this.builtAhead && this.needsStart()) {
+				this.rebuildBuiltAhead();
 				continue;
 			}
 			if (!this.starting && service.connection.state === "restarting") {
@@ -183,6 +211,12 @@ export class ServiceSupervisor implements vscode.Disposable {
 		}
 	}
 
+	/** Why there is no service to hand out. */
+	private unavailableMessage(): string {
+		if (this.disposed) return STOPPED_MESSAGE;
+		return this.unavailableReason ?? "OMP is not available";
+	}
+
 	/** Resolves once an automatic restart of `service` is over, whichever way it ended. */
 	private restarted(service: OmpServiceApi): Promise<void> {
 		const done = deferred<void>();
@@ -200,6 +234,11 @@ export class ServiceSupervisor implements vscode.Disposable {
 	}
 
 	private async restartNow(): Promise<void> {
+		if (this.builtAhead && this.needsStart()) {
+			this.rebuildBuiltAhead();
+			if (this.current) await this.start(this.options.resumeOptions());
+			return;
+		}
 		const service = this.current;
 		if (!service) {
 			if (this.createService()) this.startInBackground(this.options.resumeOptions());

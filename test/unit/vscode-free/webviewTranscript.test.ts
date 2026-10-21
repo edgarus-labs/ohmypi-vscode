@@ -170,10 +170,29 @@ describe("TranscriptView", () => {
 		withTail.notice("info", "note");
 		assert.ok(withTail.element.lastElementChild === tail);
 		withTail.reset([{ kind: "user", id: "u2", text: "again" }]);
-		assert.deepEqual(Array.from(withTail.element.children, child => child.getAttribute("data-id")), ["u2", null]);
+		assert.deepEqual(Array.from(withTail.element.children, child => child.getAttribute("data-id")), ["u2", "local-1", null]);
 		assert.ok(withTail.element.lastElementChild === tail);
-		assert.equal(withTail.isEmpty, false);
-		withTail.reset([]);
-		assert.equal(withTail.isEmpty, true);
+	});
+
+	it("is empty after a reset to no items", () => {
+		view.upsert({ kind: "user", id: "u1", text: "hi" });
+		assert.equal(view.isEmpty, false);
+		view.reset([]);
+		assert.equal(view.isEmpty, true);
+	});
+
+	it("keeps the webview's own notices across a reset, after the restored items", () => {
+		const ids = () => Array.from(view.element.children, child => child.getAttribute("data-id"));
+		view.upsert({ kind: "user", id: "u1", text: "hi" });
+		view.notice("warning", "attach the images again");
+		view.reset([
+			{ kind: "user", id: "u2", text: "again" },
+			{ kind: "notice", id: "h1", level: "info", text: "compacted" },
+		]);
+		assert.deepEqual(ids(), ["u2", "h1", "local-1"]);
+		view.reset([]);
+		assert.deepEqual(ids(), ["local-1"]);
+		assert.equal(view.hasConversation, false);
+		assert.deepEqual(announced, ["attach the images again"]);
 	});
 });

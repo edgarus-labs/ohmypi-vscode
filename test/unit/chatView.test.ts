@@ -229,6 +229,14 @@ describe("ChatView", () => {
 			assert.deepEqual(reset.connection, { state: "ready" });
 		});
 
+		it("allows blob: images so pasted and dropped image chips show their preview", () => {
+			const view = resolve(fakeView());
+			const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(view.webview.html)?.[1] ?? "";
+			const imgSrc = csp.split(";").map(directive => directive.trim()).find(directive => directive.startsWith("img-src "));
+			assert.deepEqual(imgSrc?.split(" "), ["img-src", "vscode-resource:", "data:", "blob:"]);
+			assert.match(csp, /default-src 'none'/);
+		});
+
 		it("tells the webview whether to post render reports", async () => {
 			assert.equal((await ready()).ofType("reset")[0].testHooks, false);
 			chat.dispose();
@@ -506,6 +514,26 @@ describe("ChatView", () => {
 			started.resolve(service.api);
 			await settle();
 			assert.deepEqual(pendingIds, ["pending-1"]);
+		});
+
+		it("posts the pending item to the service OMP starts with when starting it replaces the idle one", async () => {
+			const replacement = fakeService();
+			replacement.pendingId = "pending-2";
+			const pendingIds: Array<string | undefined> = [];
+			replacement.prompt = (_text, pendingId) => {
+				pendingIds.push(pendingId);
+				return Promise.resolve({ status: "completed", sessionSettled: true });
+			};
+			service.pendingId = "stale";
+			host.ensureService = async () => {
+				chat.setService(replacement.api);
+				return replacement.api;
+			};
+			const webview = await ready();
+			webview.receive(send("s8"));
+			await settle();
+			assert.deepEqual(pendingIds, ["pending-2"]);
+			assert.deepEqual(webview.ofType("item").map(message => message.item.id), ["pending-2"]);
 		});
 
 		it("drops the pending item when OMP cannot be started", async () => {

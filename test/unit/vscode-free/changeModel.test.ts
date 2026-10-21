@@ -99,6 +99,17 @@ describe("ChangeModel", () => {
 		assert.deepEqual(model.changes, [{ path: file("a.ts"), status: "M", added: 1, removed: 1 }]);
 	});
 
+	it("takes the oldText of a result entry that names the file in another form than an earlier entry without one", async () => {
+		const fake = disk({ [file("a.ts")]: "after\n" });
+		const model = new ChangeModel(fake.read, memoryLogger());
+		await model.apply(start("t1", "edit", { path: "a.ts" }), scope);
+		const details = { path: "a.ts", perFileResults: [{ path: file("a.ts"), oldText: "before\n" }] };
+		const result = await model.apply(end("t1", "edit", { path: "a.ts" }, details), scope);
+		assert.deepEqual(result.baselinesChanged, [file("a.ts")]);
+		assert.equal(model.baseline(file("a.ts")), "before\n");
+		assert.deepEqual(model.changes, [{ path: file("a.ts"), status: "M", added: 1, removed: 1 }]);
+	});
+
 	it("keeps an earlier call's baseline over a later call's oldText", async () => {
 		const fake = disk({ [file("a.ts")]: "v1\n" });
 		const model = new ChangeModel(fake.read, memoryLogger());

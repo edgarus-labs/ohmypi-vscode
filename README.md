@@ -34,6 +34,8 @@ When `omp.executablePath` is empty, the extension looks for `omp` on `PATH` (on 
 
 OMP runs in the first workspace folder, also in a multi-root workspace. With no folder open it runs in the folder of the active file, or else in your home directory, and starts only when you first use it (a prompt, a command or **Start OMP**).
 
+On Windows, `omp.cmd` (the npm install) cannot run in a folder on a network or WSL share (`\\server\share\…`, `\\wsl.localhost\…`), because it runs through cmd.exe, which does not accept such a folder; OMP then fails to start and says so. Point `omp.executablePath` at `omp.exe` for such workspaces.
+
 ## Layout
 
 OMP lives in its own panel in the **Secondary Side Bar** on the right, like Claude Code, GitHub Copilot Chat and Codex, so the Explorer and your editors stay where they are. Open it with the OMP icon on the right, `OMP: Open in Side Bar`, or the `OMP: …` status bar item; toggle the whole right panel with `View > Appearance > Secondary Side Bar` (Ctrl+Alt+B / Cmd+Option+B). The panel has three sections:
@@ -69,7 +71,7 @@ On VS Code older than 1.106, which has no extension containers in the Secondary 
 - **Session cost**: the header's cost is the running sum of the main agent's replies. After a compacted session is reloaded OMP returns only the messages after the compaction, so the total restarts from there; subagent cost is not included.
 - **Accessibility**: screen readers hear each finished reply, notice and question once; streaming text and the elapsed timer are not read out. Notices expand with Enter or Space.
 - **Changes and file links outside the workspace**: change tracking only follows files inside OMP's working directory and the workspace folders. Opening a file link or tool diff that points outside the workspace asks for confirmation first.
-- **Agent control of VS Code**: the extension registers `vscode_*` host tools with OMP every time it starts, so agents can operate the editor, not just chat in it. They run in the extension host through the VS Code API, and a failure comes back to the agent as a tool error; OMP's `host_tool_cancel` cancels a call, and calls in flight are cancelled when OMP stops. Every path argument must lie inside OMP's working directory or a workspace folder; other paths are refused. Results are capped at 40,000 characters. Approval of tool calls is OMP's policy, as for any tool.
+- **Agent control of VS Code**: the extension registers `vscode_*` host tools with OMP every time it starts, so agents can operate the editor, not just chat in it. They run in the extension host through the VS Code API, and a failure comes back to the agent as a tool error; OMP's `host_tool_cancel` cancels a call, and calls in flight are cancelled when OMP stops. Every path argument must lie inside OMP's working directory or a workspace folder; other paths are refused. `vscode_execute_command` is not limited this way: it runs any registered command, internal ones included, with any arguments, so through it an agent can open, edit or run things outside the workspace. Results are capped at 40,000 characters. Approval of tool calls is OMP's policy, as for any tool.
 
 | Area | Tools |
 | --- | --- |
@@ -107,7 +109,7 @@ npm run typecheck
 npm run test:unit         # mocha in Node (protocol, process, session, agents, UI helpers, webview with linkedom)
 npm run test:integration  # VS Code extension host against test/fixtures/fake-omp.mjs
 npm run test:integration:min  # the same suite against the oldest supported VS Code (engines minimum)
-npm run test:real         # VS Code extension host against a real OMP (sends real model requests)
+npm run test:real         # VS Code extension host against a real OMP (model requests only with OMP_IT_MODEL set)
 ```
 
-Development needs Node 22.12 or newer. `npm run test:unit` caps the test process heap at 1.5 GB (the suite peaks at about 140 MB), so a runaway test fails instead of exhausting a build agent's memory. On a machine without a display, wrap the integration runs in `xvfb-run -a`. The integration suite runs on a pinned VS Code version; pass `--vscode-version=<version|min>` or set `OMP_IT_VSCODE_VERSION` to pick another, or set `OMP_IT_VSCODE=<path to code binary>` to reuse an already downloaded VS Code. Set `OMP_IT_EXECUTABLE=<path to omp>` for `test:real`. Unit tests can be built into a separate directory with `node esbuild.mjs --tests --outdir=out/<name>`.
+Development needs Node 22.12 or newer. `npm run test:unit` caps the test process heap at 1.5 GB (the suite peaks at about 140 MB), so a runaway test fails instead of exhausting a build agent's memory. On a machine without a display, wrap the integration runs in `xvfb-run -a`. The integration suite runs on a pinned VS Code version; pass `--vscode-version=<version|min>` or set `OMP_IT_VSCODE_VERSION` to pick another, or set `OMP_IT_VSCODE=<path to code binary>` to reuse an already downloaded VS Code. Set `OMP_IT_EXECUTABLE=<path to omp>` for `test:real`, and `OMP_IT_MODEL=<provider>/<model id>` to run its real turns (model switch, auto effort, real edit with native diff); without it only the handshake and model-discovery test runs and the other three are reported as pending. Unit tests can be built into a separate directory with `node esbuild.mjs --tests --outdir=out/<name>`.

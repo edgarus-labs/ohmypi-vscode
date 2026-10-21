@@ -12,8 +12,8 @@ export interface DebugStop {
 export type DebugOutcome<S> = { kind: "stopped"; session: S; stop: DebugStop } | { kind: "ended" } | { kind: "running" };
 
 interface Waiter<S> {
-	sessionId: string | undefined;
-	settle(outcome: DebugOutcome<S>): void;
+	onStop(session: S, stop: DebugStop): void;
+	onEnd(sessionId: string): void;
 }
 
 /** DAP requests after which the debuggee runs. */
@@ -30,7 +30,7 @@ const RESUMING_REQUESTS: Record<string, true> = {
 
 /**
  * Debug sessions as their adapters report them: which are stopped where, fed by a debug adapter
- * tracker's messages, and waits for the next stop or end after resuming one.
+ * tracker's messages; waits for the next stop or end after resuming one, and for every end after stopping them.
  */
 export class DebugSessions<S extends { readonly id: string }> {
 	readonly #sessions = new Map<string, { session: S; stop?: DebugStop }>();
@@ -55,7 +55,7 @@ export class DebugSessions<S extends { readonly id: string }> {
 					...(text ? { text } : {}),
 				};
 				entry.stop = stop;
-				for (const waiter of this.#waiters) waiter.settle({ kind: "stopped", session: entry.session, stop });
+				for (const waiter of this.#waiters) waiter.onStop(entry.session, stop);
 				return;
 			}
 			case "continued":
@@ -77,7 +77,7 @@ export class DebugSessions<S extends { readonly id: string }> {
 	/** Session `sessionId` ended or its adapter exited. */
 	onEnded(sessionId: string): void {
 		this.#sessions.delete(sessionId);
-		for (const waiter of this.#waiters) if (waiter.sessionId === undefined || waiter.sessionId === sessionId) waiter.settle({ kind: "ended" });
+		for (const waiter of this.#waiters) waiter.onEnd(sessionId);
 	}
 
 	/** The stopped sessions, in the order they started. */
@@ -94,24 +94,61 @@ export class DebugSessions<S extends { readonly id: string }> {
 		signal.throwIfAborted();
 		const entry = sessionId === undefined ? undefined : this.#sessions.get(sessionId);
 		if (entry) entry.stop = undefined;
+		return this.#settleAfter<DebugOutcome<S>>(act, timeoutMs, signal, { kind: "running" }, settle => ({
+			onStop: (session, stop) => settle({ kind: "stopped", session, stop }),
+			onEnd: id => {
+				if (sessionId === undefined || id === sessionId) settle({ kind: "ended" });
+			},
+		}));
+	}
+
+	/**
+	 * Runs `act` and resolves `true` once every tracked session and every session in `others` ended, or `false`
+	 * when some still run `timeoutMs` after `act` finished. Rejects with `act`'s failure or `signal`'s reason.
+	 */
+	async endAfter(act: () => PromiseLike<unknown>, timeoutMs: number, signal: AbortSignal, others: readonly string[] = []): Promise<boolean> {
+		const running = new Set([...this.#sessions.keys(), ...others]);
+		if (running.size === 0) {
+			signal.throwIfAborted();
+			await act();
+			return true;
+		}
+		return this.#settleAfter(act, timeoutMs, signal, false, settle => ({
+			onStop: () => {},
+			onEnd: id => {
+				running.delete(id);
+				if (running.size === 0) settle(true);
+			},
+		}));
+	}
+
+	/** Runs `act` and resolves with what the waiter settles, or `timedOut` once `timeoutMs` passed after `act` finished. */
+	async #settleAfter<T>(
+		act: () => PromiseLike<unknown>,
+		timeoutMs: number,
+		signal: AbortSignal,
+		timedOut: T,
+		waiter: (settle: (value: T) => void) => Waiter<S>,
+	): Promise<T> {
+		signal.throwIfAborted();
 		let timer: NodeJS.Timeout | undefined;
-		let waiter: Waiter<S> | undefined;
+		let registered: Waiter<S> | undefined;
 		let onAbort: (() => void) | undefined;
-		const outcome = new Promise<DebugOutcome<S>>((resolve, reject) => {
-			waiter = { sessionId, settle: resolve };
-			this.#waiters.add(waiter);
+		const outcome = new Promise<T>((resolve, reject) => {
+			registered = waiter(resolve);
+			this.#waiters.add(registered);
 			onAbort = () => reject(signal.reason);
 			signal.addEventListener("abort", onAbort, { once: true });
 		});
 		try {
 			await Promise.race([act(), outcome]);
-			const timeout = new Promise<DebugOutcome<S>>(resolve => {
-				timer = setTimeout(() => resolve({ kind: "running" }), timeoutMs);
+			const timeout = new Promise<T>(resolve => {
+				timer = setTimeout(() => resolve(timedOut), timeoutMs);
 			});
 			return await Promise.race([outcome, timeout]);
 		} finally {
 			clearTimeout(timer);
-			if (waiter) this.#waiters.delete(waiter);
+			if (registered) this.#waiters.delete(registered);
 			if (onAbort) signal.removeEventListener("abort", onAbort);
 		}
 	}

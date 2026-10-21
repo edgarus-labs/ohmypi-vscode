@@ -3,7 +3,7 @@ import { OpenStateStore, type RenderContext } from "../../../src/webview/context
 import { collapsible } from "../../../src/webview/dom";
 import type { WebviewMessage } from "../../../src/webview/protocol";
 import { renderTool, type ToolItem } from "../../../src/webview/tools";
-import { click, copied, event, settle, useDom } from "./webviewDom";
+import { click, copied, event, focused, settle, useDom } from "./webviewDom";
 
 function tool(overrides: Partial<ToolItem> & Pick<ToolItem, "name">): ToolItem {
 	return { kind: "tool", id: "t1", args: {}, status: "done", startedAt: 0, endedAt: 1, ...overrides };
@@ -84,6 +84,22 @@ describe("tool rows", () => {
 			click(button(el, "show more (2 lines)"));
 			assert.ok(el.querySelector(".tool-body .code-view"));
 			assert.deepEqual(labels(el), ["collapse"]);
+			assert.equal(focused.at(-1)?.textContent, "collapse");
+			click(focused.at(-1));
+			assert.equal(focused.at(-1)?.textContent, "show more (2 lines)");
+		});
+
+		it("moves focus to the pressed block's own collapse and show more", () => {
+			const args = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`key${index}`, index]));
+			const el = mount(tool({ name: "web_search", args, result: { text: numbered(8), isError: false } }), ctx);
+			const partOf = (control: Element | undefined) => control?.closest(".tool-part")?.querySelector(".tool-label")?.textContent;
+			assert.deepEqual(labels(el), ["show more (8 lines)", "show more (8 lines)"]);
+			click(el.querySelectorAll(".tool-part")[1]?.querySelector("button"));
+			assert.equal(focused.at(-1)?.textContent, "collapse");
+			assert.equal(partOf(focused.at(-1)), "OUT");
+			click(focused.at(-1));
+			assert.equal(focused.at(-1)?.textContent, "show more (8 lines)");
+			assert.equal(partOf(focused.at(-1)), "OUT");
 		});
 
 		it("keeps showing a failed call's first error line", () => {
@@ -153,7 +169,7 @@ describe("tool rows", () => {
 	describe("diffs", () => {
 		const diffLines = (count: number) => ["@@ -1 +1 @@", "-const total = 1;", "+const sum = 1;", ...Array.from({ length: count - 3 }, (_, index) => ` ctx ${index}`)].join("\n");
 
-		it("shows 20 tinted lines with the changed words marked, then show more", () => {
+		it("shows 20 tinted lines with the changed words marked, then show more and collapse", () => {
 			const el = mount(tool({ name: "edit", args: { path: "a.ts" }, result: { text: "ok", isError: false, details: { diff: diffLines(30) } } }), ctx);
 			assert.equal(el.querySelectorAll(".diff-line").length, 20);
 			assert.equal(el.querySelector(".d-add .d-sign")?.textContent, "+");
@@ -163,6 +179,10 @@ describe("tool rows", () => {
 			);
 			click(button(el, "show more (30 lines)"));
 			assert.equal(el.querySelectorAll(".diff-line").length, 30);
+			assert.equal(focused.at(-1)?.textContent, "collapse");
+			click(focused.at(-1));
+			assert.equal(el.querySelectorAll(".diff-line").length, 20);
+			assert.equal(focused.at(-1)?.textContent, "show more (30 lines)");
 		});
 
 		it("offers Copy all past 2000 diff lines", async () => {

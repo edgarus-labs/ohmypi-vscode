@@ -219,20 +219,21 @@ class OmpHost implements vscode.Disposable {
 	}
 }
 
-let host: OmpHost | undefined;
+let active: { host: OmpHost; output: vscode.OutputChannel } | undefined;
 
 export function activate(context: vscode.ExtensionContext): OmpExtensionApi {
 	const output = vscode.window.createOutputChannel("oh-my-pi");
 	const logger = new OutputLogger(output);
 	const created = new OmpHost(context, output, logger);
-	host = created;
-	context.subscriptions.push(output, created);
+	active = { host: created, output };
+	context.subscriptions.push(created);
 	created.initialize();
 	return created.api;
 }
 
+/** Stops OMP. VS Code disposes the subscriptions without waiting for this, so the output channel closes only once OMP has stopped. */
 export function deactivate(): Promise<void> | undefined {
-	const current = host;
-	host = undefined;
-	return current?.stop();
+	const current = active;
+	active = undefined;
+	return current?.host.stop().finally(() => current.output.dispose());
 }

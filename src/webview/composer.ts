@@ -66,6 +66,7 @@ export class Composer {
 	/** Images whose bytes are still being read. */
 	readonly #reading = { count: 0, bytes: 0 };
 	#pending: PendingSend | undefined;
+	/** Highest "Pasted text N" number given out, counting those of the draft restored after a reload. */
 	#pastedTextSequence = 0;
 	#imageSequence = 0;
 	#busy = false;
@@ -158,7 +159,12 @@ export class Composer {
 		});
 		this.element.addEventListener("drop", event => this.#drop(event));
 		window.addEventListener("resize", () => this.autosize());
-		this.#setAttachments([...deps.state.attachments]);
+		const restored = [...deps.state.attachments];
+		for (const attachment of restored) {
+			const number = attachment.kind === "text" ? /^Pasted text (\d+)$/.exec(attachment.label)?.[1] : undefined;
+			if (number) this.#pastedTextSequence = Math.max(this.#pastedTextSequence, Number(number));
+		}
+		this.#setAttachments(restored);
 	}
 
 	/** Labels of the attached chips. */

@@ -37,10 +37,21 @@ export const stub = {
 		workspace.workspaceFolders = undefined;
 		workspace.isTrusted = true;
 		trustGranted.dispose();
+		debug.activeDebugSession = undefined;
+		taskProcessEnded.dispose();
+		taskEnded.dispose();
 	},
 	/** Fires `workspace.onDidGrantWorkspaceTrust`. */
 	grantTrust(): void {
 		trustGranted.fire();
+	},
+	/** Fires `tasks.onDidEndTaskProcess`. */
+	endTaskProcess(event: { execution: unknown; exitCode: number | undefined }): void {
+		taskProcessEnded.fire(event);
+	},
+	/** Fires `tasks.onDidEndTask`. */
+	endTask(event: { execution: unknown }): void {
+		taskEnded.fire(event);
 	},
 };
 
@@ -340,12 +351,14 @@ export const workspace = {
 	workspaceFolders: undefined as unknown,
 	isTrusted: true,
 	onDidGrantWorkspaceTrust: (listener: () => unknown): Disposable => trustGranted.event(listener),
-	getConfiguration(section?: string) {
+	/** `inspect(key)` answers through the `"workspaceConfiguration.inspect"` handler, called with `"<section>.<key>"` and `scope`. */
+	getConfiguration(section?: string, scope?: unknown) {
 		record("workspace.getConfiguration", [section]);
 		const key = (name: string) => (section ? `${section}.${name}` : name);
 		return {
 			get: <T>(name: string, defaultValue?: T): T | undefined => (stub.config.has(key(name)) ? (stub.config.get(key(name)) as T) : defaultValue),
 			has: (name: string): boolean => stub.config.has(key(name)),
+			inspect: (name: string): unknown => record("workspaceConfiguration.inspect", [key(name), scope]),
 			update: thenable("workspaceConfiguration.update"),
 		};
 	},
@@ -371,7 +384,26 @@ export const env = {
 	openExternal: thenable("env.openExternal"),
 };
 
+export enum TaskScope {
+	Global = 1,
+	Workspace = 2,
+}
+
+const taskProcessEnded = new EventEmitter<{ execution: unknown; exitCode: number | undefined }>();
+const taskEnded = new EventEmitter<{ execution: unknown }>();
+
+/** `fetchTasks` without a handler: no tasks. `stub.endTaskProcess` / `stub.endTask` fire the end events. */
+export const tasks = {
+	fetchTasks: (...args: unknown[]): Promise<unknown> => Promise.resolve(record("tasks.fetchTasks", args) ?? []),
+	executeTask: thenable("tasks.executeTask"),
+	onDidEndTaskProcess: taskProcessEnded.event,
+	onDidEndTask: taskEnded.event,
+};
+
 export const debug = {
+	activeDebugSession: undefined as unknown,
+	startDebugging: thenable("debug.startDebugging"),
+	stopDebugging: thenable("debug.stopDebugging"),
 	registerDebugAdapterTrackerFactory: (...args: unknown[]): Disposable => {
 		record("debug.registerDebugAdapterTrackerFactory", args);
 		return new Disposable(() => record("debug.registerDebugAdapterTrackerFactory.dispose", args));

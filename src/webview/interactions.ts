@@ -141,9 +141,10 @@ export interface InteractionsDeps {
 
 /**
  * Pending OMP questions (confirm, select, input, editor, ask) as labelled cards above the composer, with
- * timeout countdowns. A new card is announced and focused unless the user is typing; answering returns
- * focus to the composer; Escape cancels. A question shown again keeps what the user entered; one that
- * cannot be shown is cancelled so OMP does not wait for its timeout.
+ * timeout countdowns. A new card is announced and focused unless the user is typing; answering, or a
+ * focused card going away, returns focus to the composer; Escape cancels. A question shown again keeps
+ * what the user entered and the focused control; one that cannot be shown is cancelled so OMP does not
+ * wait for its timeout.
  */
 export class InteractionsView {
 	readonly element = h("div", { class: "interactions" });
@@ -209,8 +210,11 @@ export class InteractionsView {
 		this.#tick();
 	}
 
+	/** Drops the card; focus on it moves to the composer. */
 	remove(id: string): void {
-		this.#nodes.get(id)?.remove();
+		const el = this.#nodes.get(id);
+		if (el?.contains(document.activeElement)) this.#deps.focusComposer();
+		el?.remove();
 		this.#nodes.delete(id);
 		this.#expiries.delete(id);
 	}

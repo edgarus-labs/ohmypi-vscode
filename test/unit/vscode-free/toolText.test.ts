@@ -133,7 +133,28 @@ describe("findMarks", () => {
 	});
 
 	it("stops after a bounded number of matches", () => {
-		assert.equal(findMarks("a".repeat(20_000), /a/g).length, 10_000);
+		assert.equal(findMarks("a\n".repeat(20_000), /a/g).length, 10_000);
+	});
+
+	it("matches within each line and its first 1000 columns, leaving out a match the cut ends", () => {
+		const line = `${"x".repeat(990)}foo${"y".repeat(5)}foo${"z".repeat(10)}`;
+		assert.deepEqual(findMarks(`${line}\nfoo`, /foo/g), [
+			{ start: 990, end: 993 },
+			{ start: line.length + 1, end: line.length + 4 },
+		]);
+		assert.deepEqual(findMarks("a".repeat(1500), /a+$/gm), []);
+		assert.deepEqual(findMarks("a\nb", /a\sb/g), []);
+		assert.deepEqual(findMarks("ab\nab", /b$/gm), [
+			{ start: 1, end: 2 },
+			{ start: 4, end: 5 },
+		]);
+	});
+
+	it("takes time linear in the text for a pattern with one quantifier", () => {
+		const started = performance.now();
+		findMarks("a".repeat(200_000), /.*x/gm);
+		const elapsed = performance.now() - started;
+		assert.ok(elapsed < 500, `took ${Math.round(elapsed)} ms`);
 	});
 });
 

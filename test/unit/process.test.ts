@@ -198,7 +198,9 @@ describe("OmpProcess (fake-omp child process)", function () {
 		}
 	});
 
-	it("kills leftover group members when the main process exits on its own", async () => {
+	it("kills leftover group members when the main process exits on its own", async function () {
+		// Windows has no process group to reach them; a test there passes only because the child's own job object ends them.
+		if (process.platform === "win32") this.skip();
 		const { proc, logger, closes, stdout } = spawnFake({ FAKE_OMP_SPAWN_CHILD: "1" });
 		await waitFor(() => stdout().includes("ready"));
 		await waitFor(() => /child pid (\d+)/.test(logger.text("debug")), 5000, "grandchild pid");
@@ -227,5 +229,31 @@ describe("OmpProcess (fake-omp child process)", function () {
 		const logger = memoryLogger();
 		await killProcessTree(pid, "SIGKILL", logger);
 		assert.match(logger.text("warn"), new RegExp(`taskkill /pid ${pid} /T /F exited with code 128`));
+	});
+
+	it("runs the system taskkill, not one in the working directory", async function () {
+		if (process.platform !== "win32") this.skip();
+		const { proc } = spawnScript("setInterval(() => {}, 1000);");
+		const pid = proc.pid!;
+		const decoyDir = path.join(sessionDir, "decoy");
+		fs.mkdirSync(decoyDir);
+		fs.copyFileSync(path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"), path.join(decoyDir, "taskkill.exe"));
+		const cwd = process.cwd();
+		process.chdir(decoyDir);
+		try {
+			await killProcessTree(pid, "SIGKILL", memoryLogger());
+		} finally {
+			process.chdir(cwd);
+		}
+		await waitFor(() => !isAlive(pid), 3000, "process killed");
+	});
+
+	it("refuses to run a .cmd launcher in a UNC working directory, which cmd.exe replaces with the Windows directory", function () {
+		if (process.platform !== "win32") this.skip();
+		const launcher = writeNodeLauncher(sessionDir, "omp", FAKE_OMP_SCRIPT);
+		assert.throws(
+			() => started.push(new OmpProcess({ executable: launcher, args: [], cwd: "\\\\localhost\\C$\\Windows\\Temp", logger: memoryLogger() })),
+			/omp\.cmd runs through cmd\.exe, which cannot run in the UNC folder \\\\localhost\\C\$\\Windows\\Temp; set omp\.executablePath to omp\.exe/,
+		);
 	});
 });

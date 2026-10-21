@@ -34,4 +34,18 @@ describe("OutputLogger", () => {
 		assert.equal(lines.length, 1);
 		assert.match(lines[0], /\[debug\] shown$/);
 	});
+
+	it("never throws once the output channel is closed", () => {
+		const closed = new OutputLogger({
+			appendLine: () => {
+				throw new Error("Channel has been closed");
+			},
+		} as unknown as vscode.OutputChannel);
+		stub.config.set("omp.logLevel", "debug");
+		assert.doesNotThrow(() => closed.error("OMP did not exit", new Error("timeout")));
+		assert.doesNotThrow(() => closed.warn("OMP ignored SIGTERM"));
+		assert.doesNotThrow(() => closed.info("OMP did not exit within 3000 ms"));
+		assert.doesNotThrow(() => closed.debug("OMP stdin error"));
+		assert.doesNotThrow(() => closed.trace("out", "{}"));
+	});
 });

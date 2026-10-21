@@ -7,7 +7,7 @@ import { renderItem } from "./messages";
  * The conversation column: one node per transcript item, then the optional trailing row (the working
  * indicator). Streaming replies and tool rows are patched in place. The column is not a live region
  * (streaming would re-announce whole messages); finished replies and notices are passed to `announce`
- * once instead.
+ * once instead. Notices the webview shows itself stay across resets, after the restored items.
  */
 export class TranscriptView {
 	readonly element = h("div", { class: "column", attrs: { role: "log", "aria-live": "off", "aria-label": "Conversation" } });
@@ -16,6 +16,8 @@ export class TranscriptView {
 	readonly #nodes = new Map<string, HTMLElement>();
 	/** Assistant replies already announced or restored by a reset. */
 	readonly #settled = new Set<string>();
+	/** Ids of the notices raised through `notice()`, in order. */
+	readonly #localNotices: string[] = [];
 	#localNoticeSequence = 0;
 	readonly #tail: HTMLElement | null;
 
@@ -27,12 +29,18 @@ export class TranscriptView {
 	}
 
 	reset(items: readonly TranscriptItem[]): void {
+		const notices = this.#localNotices.map(id => [id, this.#nodes.get(id)] as const);
 		this.#nodes.clear();
 		this.#settled.clear();
 		this.element.replaceChildren(...(this.#tail ? [this.#tail] : []));
 		for (const item of items) {
 			if (item.kind === "assistant" && !item.streaming) this.#settled.add(item.id);
 			this.#place(item);
+		}
+		for (const [id, el] of notices) {
+			if (!el) continue;
+			this.element.insertBefore(el, this.#tail);
+			this.#nodes.set(id, el);
 		}
 	}
 
@@ -46,7 +54,9 @@ export class TranscriptView {
 
 	/** A notice raised by the webview or the host outside OMP's transcript. */
 	notice(level: "info" | "warning" | "error", text: string): void {
-		this.#place({ kind: "notice", id: `local-${++this.#localNoticeSequence}`, level, text });
+		const id = `local-${++this.#localNoticeSequence}`;
+		this.#localNotices.push(id);
+		this.#place({ kind: "notice", id, level, text });
 		this.#announce(text);
 	}
 

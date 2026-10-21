@@ -50,6 +50,13 @@ describe("shared formatters", () => {
 		assert.equal(compactTokens(2_500_000), "2.5M");
 	});
 
+	it("chooses the token unit after rounding, so a count that rounds to a thousand thousands reads in millions", () => {
+		assert.equal(compactTokens(999_949), "999.9k");
+		assert.equal(compactTokens(999_950), "1M");
+		assert.equal(compactTokens(999_999), "1M");
+		assert.equal(compactTokens(1_000_000), "1M");
+	});
+
 	describe("turn summary", () => {
 		const summary = (overrides: Partial<Extract<TranscriptItem, { kind: "turn_summary" }>>): Extract<TranscriptItem, { kind: "turn_summary" }> => ({
 			kind: "turn_summary",

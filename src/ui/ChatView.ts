@@ -65,7 +65,10 @@ function externalLink(url: unknown): string | undefined {
 
 /** What the chat view needs from the extension host. */
 export interface ChatHost {
-	/** The running service; starts OMP first when it is not running (manual startup, no folder, after a failure). Rejects when OMP is unavailable. */
+	/**
+	 * The running service; starts OMP first when it is not running (manual startup, no folder, after a failure). Rejects when OMP is unavailable.
+	 * When starting replaces the current service, the chat is handed the new one before this returns.
+	 */
 	ensureService(): Promise<OmpServiceApi>;
 	pendingInteractions(): PendingInteraction[];
 	respond(id: string, response: Extract<WebviewMessage, { type: "respond" }>["response"]): void;
@@ -242,7 +245,7 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 			"default-src 'none'",
 			`style-src ${webview.cspSource}`,
 			`script-src 'nonce-${nonce}'`,
-			`img-src ${webview.cspSource} data:`,
+			`img-src ${webview.cspSource} data: blob:`,
 			`font-src ${webview.cspSource}`,
 		].join("; ");
 		return `<!DOCTYPE html>
@@ -511,10 +514,12 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 		attachments: readonly Attachment[] = [],
 		onAccepted?: () => void,
 	): Promise<PromptOutcome> {
+		// Asked for first so that, when starting OMP replaces the service, the pending message goes to the new one.
+		const ensuring = this.host.ensureService();
 		const shown = this.showPending(text, attachments);
 		let outcome: Promise<PromptOutcome>;
 		try {
-			const service = await this.host.ensureService();
+			const service = await ensuring;
 			const withContext = includeContext && !isSlashCommand(text, service.session.commands);
 			const { message, images } = composePrompt({
 				text,

@@ -26,10 +26,11 @@ export function elapsedText(ms: number): string {
 	return `${Math.floor(seconds / 3600)}h ${pad(Math.floor(seconds / 60) % 60)}m`;
 }
 
-/** `950`, `12.3k`, `8k`, `2.5M`. */
+/** `950`, `12.3k`, `8k`, `2.5M`; rounded before the unit is chosen, so 999,950 reads `1M`. */
 export function compactTokens(value: number): string {
-	if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(1)}M`;
-	if (value >= 1000) return `${+(value / 1000).toFixed(1)}k`;
+	const thousands = +(value / 1000).toFixed(1);
+	if (thousands >= 1000) return `${+(value / 1_000_000).toFixed(1)}M`;
+	if (value >= 1000) return `${thousands}k`;
 	return String(value);
 }
 

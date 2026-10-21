@@ -68,6 +68,13 @@ export class OmpService implements OmpServiceApi {
 	#usageCapture: string[] | undefined;
 	/** Settles when the usage request in progress has; requests run one at a time. */
 	#usageQueue: Promise<unknown> = Promise.resolve();
+	/**
+	 * Prompt requests OMP has not answered yet. OMP handles prompts one at a time and prints a command's
+	 * output before answering it, so `/usage` sent once these are answered captures only its own output.
+	 */
+	readonly #openPrompts = new Set<Promise<void>>();
+	/** Settles once OMP has answered the `/usage` request in flight; prompts given meanwhile are sent then. */
+	#usageAnswered: Promise<void> | undefined;
 
 	readonly onDidChangeConnection: Event<ConnectionStatus>;
 	readonly onDidChangeSession: Event<SessionView>;
@@ -244,13 +251,17 @@ export class OmpService implements OmpServiceApi {
 			...(streamingBehavior ? { streamingBehavior } : {}),
 		};
 		let admitted = false;
-		client.request("prompt", params, { id, timeoutMs: 0 }).then(
+		const send = () => client.request("prompt", params, { id, timeoutMs: 0 });
+		const answered = (this.#usageAnswered ? this.#usageAnswered.then(send) : send()).then(
 			ack => {
 				admitted = true;
 				this.#tracker.acknowledged(id, ack?.agentInvoked);
 			},
 			error => this.#tracker.rejected(id, errorMessage(error)),
 		);
+		this.#openPrompts.add(answered);
+		const forget = () => this.#openPrompts.delete(answered);
+		answered.then(forget, forget);
 		return outcome.then(result => {
 			if (pendingItemId !== undefined) {
 				if (admitted) this.#store.confirmPendingUser(pendingItemId);
@@ -331,17 +342,26 @@ export class OmpService implements OmpServiceApi {
 
 	/**
 	 * Sends `/usage` as a plain prompt (no transcript row, no prompt tracking) and reads the report from the
-	 * command output captured meanwhile; `omp usage --json` runs alongside to name the quota buckets.
+	 * command output captured until OMP answers it, however long that takes; `omp usage --json` runs alongside
+	 * to name the quota buckets.
 	 */
 	async #loadUsage(): Promise<ProviderUsage[]> {
+		this.#requireClient();
+		while (this.#openPrompts.size > 0) await Promise.all(this.#openPrompts);
 		const client = this.#requireClient();
 		const capture: string[] = [];
 		this.#usageCapture = capture;
 		const buckets = fetchUsageJson(this.#usageJson);
+		const request = client.request("prompt", { message: "/usage" }, { timeoutMs: 0 });
+		this.#usageAnswered = request.then(
+			() => undefined,
+			() => undefined,
+		);
 		try {
-			await client.request("prompt", { message: "/usage" });
+			await request;
 		} finally {
 			this.#usageCapture = undefined;
+			this.#usageAnswered = undefined;
 		}
 		const text = capture.map(output => `${output}\n`).join("");
 		if (!isUsageReport(text)) throw new Error("OMP printed no usage report");

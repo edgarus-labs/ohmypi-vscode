@@ -155,6 +155,47 @@ describe("ServiceSupervisor", () => {
 		assert.match(logger.text("info"), /No workspace folder is open/);
 	});
 
+	it("without a workspace folder builds the service again when OMP first starts, so its folder follows the editor active then", async () => {
+		workspace.workspaceFolders = undefined;
+		supervisor.initialize();
+		const idle = services[0];
+		const ensured = supervisor.ensureService();
+		assert.equal(services.length, 2, "built again at first use");
+		assert.equal(idle.disposed, true);
+		assert.equal(idle.starts.length, 0);
+		const started = services[1];
+		assert.equal(started.starts.length, 1);
+		assert.equal(supervisor.service, started.api);
+		assert.deepEqual(consumed, [idle.api, undefined, started.api]);
+		started.setConnection({ state: "ready" });
+		started.starts[0].done.resolve();
+		assert.equal(await ensured, started.api);
+		await supervisor.ensureService();
+		assert.equal(services.length, 2, "built only once");
+	});
+
+	it("without a workspace folder builds the service again when OMP: Restart first starts it", async () => {
+		workspace.workspaceFolders = undefined;
+		supervisor.initialize();
+		const restarted = supervisor.restart();
+		assert.equal(services.length, 2);
+		assert.equal(services[0].disposed, true);
+		assert.equal(services[1].starts.length, 1);
+		services[1].setConnection({ state: "ready" });
+		services[1].starts[0].done.resolve();
+		await restarted;
+	});
+
+	it("hands no service to the consumers when the service cannot be built again at first use", async () => {
+		workspace.workspaceFolders = undefined;
+		supervisor.initialize();
+		createError = new Error("omp.extraArgs must be an array of strings");
+		await assert.rejects(supervisor.ensureService(), /omp\.extraArgs must be an array of strings/);
+		assert.equal(services[0].disposed, true);
+		assert.deepEqual(consumed, [services[0].api, undefined]);
+		assert.deepEqual(unavailable, ["omp.extraArgs must be an array of strings"]);
+	});
+
 	it("resumes the current session when a command starts OMP after it failed", async () => {
 		const service = await ready();
 		service.setSession({ sessionFile: "/sessions/current.jsonl" });
@@ -320,6 +361,18 @@ describe("ServiceSupervisor", () => {
 		await Promise.all([recreated, shutDown]);
 		assert.equal(services.length, 1);
 		assert.equal(supervisor.service, undefined);
+	});
+
+	it("reports why OMP cannot be used when the service could not be built", async () => {
+		createError = new Error("omp.extraArgs must be an array of strings");
+		supervisor.initialize();
+		await assert.rejects(supervisor.ensureService(), /^Error: omp\.extraArgs must be an array of strings$/);
+	});
+
+	it("reports OMP stopped, not missing, after shutdown", async () => {
+		await ready();
+		await supervisor.shutdown();
+		await assert.rejects(supervisor.ensureService(), /OMP was stopped/);
 	});
 
 	it("does not run OMP in Restricted Mode and starts it once the workspace is trusted", async () => {

@@ -400,7 +400,9 @@ export interface OmpServiceApi extends Disposable {
 	setFastMode(enabled: boolean): Promise<void>;
 	/**
 	 * Rate limits per provider from OMP's `/usage`, kept off the transcript; limits are named by quota bucket
-	 * when `omp usage --json` succeeds. One request runs at a time. Rejects when OMP printed no usage report.
+	 * when `omp usage --json` succeeds. One request runs at a time. `/usage` is sent once OMP has answered
+	 * the prompts sent before it, and prompts given meanwhile are sent once OMP has answered `/usage`, so the
+	 * command output it keeps off the transcript is its own. Rejects when OMP printed no usage report.
 	 */
 	getUsage(): Promise<ProviderUsage[]>;
 

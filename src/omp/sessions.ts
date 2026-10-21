@@ -2,6 +2,7 @@ import type { Stats } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isRecord } from "../shared/guards";
+import { splitUserMessage } from "../shared/prompt";
 import type { Logger, SessionSummary } from "./api";
 
 const HEAD_BYTES = 64 * 1024;
@@ -53,7 +54,9 @@ async function readSummary(file: string): Promise<SessionSummary | undefined> {
 			summary.title = entry.title.trim();
 		} else if (entry.type === "message" && summary.firstMessage === undefined && isRecord(entry.message)) {
 			if (entry.message.role !== "user") continue;
-			const text = userText(entry.message.content)?.trim();
+			const content = userText(entry.message.content);
+			// The text the user typed, without the editor context, pasted text and attachments the prompt carries.
+			const text = content === undefined ? undefined : splitUserMessage(content).text;
 			if (!text) continue;
 			const chars = Array.from(text);
 			summary.firstMessage = chars.length > FIRST_MESSAGE_CHARS ? `${chars.slice(0, FIRST_MESSAGE_CHARS).join("")}…` : text;

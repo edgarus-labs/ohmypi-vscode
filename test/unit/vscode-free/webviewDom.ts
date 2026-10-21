@@ -57,6 +57,12 @@ hideNodeLinks();
 /** Elements `focus()` was called on, in order. */
 export const focused: Element[] = [];
 
+/**
+ * The element `focus()` last focused. As in browsers, `document.activeElement` is this element while it
+ * stays in the document and `<body>` once it (or an ancestor) is removed, even if it is inserted again.
+ */
+let active: Element | null = null;
+
 /** Elements `scrollIntoView()` was called on, in order. */
 export const scrolledIntoView: Element[] = [];
 
@@ -91,11 +97,19 @@ export function useDom(): void {
 	const savedMembers: Array<{ prototype: object; name: string; descriptor: PropertyDescriptor | undefined }> = [];
 	beforeEach(() => {
 		const { window, document } = parseHTML('<!doctype html><html><body><div id="app"></div></body></html>');
-		// linkedom has no HTMLDetailsElement: `open` reflects the attribute as in browsers.
-		const elementMembers: Record<"focus" | "scrollIntoView" | "open", PropertyDescriptor> = {
+		// linkedom has no focus: `focus()` moves `document.activeElement` to a connected, enabled element, and removing it drops focus.
+		const removeElement = window.HTMLElement.prototype.remove;
+		const elementMembers: Record<"focus" | "remove" | "scrollIntoView" | "open", PropertyDescriptor> = {
 			focus: {
-				value(this: Element) {
+				value(this: HTMLElement) {
 					focused.push(this);
+					if (this.isConnected && !this.hasAttribute("disabled")) active = this;
+				},
+			},
+			remove: {
+				value(this: HTMLElement) {
+					if (active && this.isConnected && this.contains(active)) active = null;
+					removeElement.call(this);
 				},
 			},
 			scrollIntoView: {
@@ -103,6 +117,7 @@ export function useDom(): void {
 					scrolledIntoView.push(this);
 				},
 			},
+			// linkedom has no HTMLDetailsElement: `open` reflects the attribute as in browsers.
 			open: {
 				get(this: Element) {
 					return this.hasAttribute("open");
@@ -152,8 +167,10 @@ export function useDom(): void {
 		install(window.HTMLTextAreaElement.prototype, textareaMembers);
 		install(window.HTMLSelectElement.prototype, selectMembers);
 		focused.length = 0;
+		active = null;
 		scrolledIntoView.length = 0;
 		copied.length = 0;
+		Object.defineProperty(document, "activeElement", { configurable: true, get: () => (active?.isConnected ? active : document.body) });
 		const values: Record<(typeof GLOBALS)[number], unknown> = {
 			window,
 			document,

@@ -21,19 +21,27 @@ export interface RowView {
 	readonly expanded: boolean;
 	/** The row closes by its own "collapse" under the header, so its blocks offer none. */
 	readonly closesToHeader: boolean;
-	setExpanded(from: Element, expanded: boolean): void;
-	/** Draws the row again, e.g. after a remembered state of one of its blocks changed. */
-	refresh(from: Element): void;
+	/** Opens or closes the row, then focuses its control whose `data-action` is `focus`. */
+	readonly setExpanded: (from: Element, expanded: boolean, focus: string) => void;
+	/** Draws the row again, e.g. after a remembered state of one of its blocks changed, then focuses its control whose `data-action` is `focus`, if any. */
+	refresh(from: Element, focus?: string): void;
 }
 
 function plural(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** A link-styled button; `action` marks it for focus after the row redraws. */
-export function linkButton(label: string, onClick: (button: HTMLButtonElement) => void, action?: string): HTMLButtonElement {
+function linkButton(label: string, onClick: (button: HTMLButtonElement) => void, action?: string): HTMLButtonElement {
 	const button: HTMLButtonElement = h("button", { class: "link", attrs: { type: "button", ...(action ? { "data-action": action } : {}) }, onClick: () => onClick(button) }, label);
 	return button;
+}
+
+/**
+ * The "show more" (`open`) or "collapse" button of the block named `block` in its row, marked `more:<block>` or
+ * `collapse:<block>`: `apply` opens or closes what the block shows and redraws the row, focusing the block's other one.
+ */
+export function toggleButton(label: string, block: string, open: boolean, apply: (from: Element, open: boolean, focus: string) => void): HTMLButtonElement {
+	return linkButton(label, button => apply(button, open, `${open ? "collapse" : "more"}:${block}`), `${open ? "more" : "collapse"}:${block}`);
 }
 
 function copyAllButton(label: string, text: string): HTMLButtonElement {
@@ -74,13 +82,13 @@ export interface CodeOptions {
 }
 
 /**
- * A tool's text as one block: cut to the preview while the row is closed, to the open limits in a scrolling
- * viewport while it is open, with "show more", "collapse" and "Copy all" as they apply. A numbered listing is
- * split into an unselectable gutter and code once, so the preview and the open text number their lines alike;
- * code gets token colors and search marks. Text without a language, marks or numbers wraps as plain text.
- * `null` for empty text.
+ * A tool's text as one block named `block` in its row: cut to the preview while the row is closed, to the open
+ * limits in a scrolling viewport while it is open, with "show more", "collapse" and "Copy all" as they apply. A
+ * numbered listing is split into an unselectable gutter and code once, so the preview and the open text number their
+ * lines alike; code gets token colors and search marks. Text without a language, marks or numbers wraps as plain
+ * text. `null` for empty text.
  */
-export function codeBlock(row: RowView, text: string, options: CodeOptions = {}): HTMLElement | null {
+export function codeBlock(row: RowView, block: string, text: string, options: CodeOptions = {}): HTMLElement | null {
 	const trimmed = text.replace(/[\r\n]+$/, "");
 	if (!trimmed) return null;
 	const listing = splitLineNumbers(text);
@@ -109,15 +117,15 @@ export function codeBlock(row: RowView, text: string, options: CodeOptions = {})
 		{ class: `code-block${options.className ? ` ${options.className}` : ""}` },
 		h("div", { class: classes }, gutter, pre),
 		linksLine(
-			cut && !row.expanded ? linkButton(`show more (${plural(lineCount, "line")})`, button => row.setExpanded(button, true), "more") : null,
-			row.expanded && longerThanPreview && !row.closesToHeader ? linkButton("collapse", button => row.setExpanded(button, false), "collapse") : null,
+			cut && !row.expanded ? toggleButton(`show more (${plural(lineCount, "line")})`, block, true, row.setExpanded) : null,
+			row.expanded && longerThanPreview && !row.closesToHeader ? toggleButton("collapse", block, false, row.setExpanded) : null,
 			cut && row.expanded ? copyAllButton(`Copy all ${plural(lineCount, "line")}`, original ?? text) : null,
 		),
 	);
 }
 
-/** Markdown prose rendered from `source` (its lines count for the labels), cut to a preview height while the row is closed. */
-export function proseBlock(row: RowView, source: string): HTMLElement {
+/** Markdown prose rendered from `source` (its lines count for the labels) as the block named `block` in its row, cut to a preview height while the row is closed. */
+export function proseBlock(row: RowView, block: string, source: string): HTMLElement {
 	const lineCount = source.replace(/[\r\n]+$/, "").split("\n").length;
 	const cut = !row.expanded && lineCount > PREVIEW_LINES;
 	const prose = h("div", { class: "md" });
@@ -127,8 +135,8 @@ export function proseBlock(row: RowView, source: string): HTMLElement {
 		{ class: "code-block" },
 		h("div", { class: `code-view prose${cut ? " cut" : ""}${row.expanded ? " expanded" : ""}` }, prose),
 		linksLine(
-			cut ? linkButton(`show more (${plural(lineCount, "line")})`, button => row.setExpanded(button, true), "more") : null,
-			row.expanded && lineCount > PREVIEW_LINES && !row.closesToHeader ? linkButton("collapse", button => row.setExpanded(button, false), "collapse") : null,
+			cut ? toggleButton(`show more (${plural(lineCount, "line")})`, block, true, row.setExpanded) : null,
+			row.expanded && lineCount > PREVIEW_LINES && !row.closesToHeader ? toggleButton("collapse", block, false, row.setExpanded) : null,
 		),
 	);
 }
@@ -153,25 +161,28 @@ function diffLine(line: string, kind: DiffLineClass, changed: ChangedSpan | unde
 
 /**
  * A unified diff as full-width tinted lines with only the +/- sign colored and the changed words of paired lines
- * on a stronger tint: the first lines with "show more" (remembered under `key`), which shows up to the diff
- * limit, with "Copy all" past that.
+ * on a stronger tint, as the block named `block` in its row: the first lines with "show more" (remembered under
+ * `key`), which shows up to the diff limit with "collapse", and "Copy all" past that limit.
  */
-export function diffView(row: RowView, key: string, diff: string): HTMLElement {
+export function diffView(row: RowView, block: string, key: string, diff: string): HTMLElement {
 	const lines = diff.replace(/\n+$/, "").split("\n");
-	const limit = row.ctx.isOpen(key) === true ? DIFF_LINES : DIFF_PREVIEW_LINES;
-	const shown = lines.length > limit ? lines.slice(0, limit) : lines;
+	const open = row.ctx.isOpen(key) === true;
+	const shown = lines.slice(0, open ? DIFF_LINES : DIFF_PREVIEW_LINES);
 	const classes = diffLineClasses(lines);
 	const spans = changedSpans(shown);
 	const view = h("div", { class: "diff-view" }, ...shown.map((line, index) => diffLine(line, classes[index], spans[index])));
-	if (shown.length === lines.length) return h("div", { class: "code-block" }, view);
-	const more =
-		limit === DIFF_PREVIEW_LINES
-			? linksLine(
-					linkButton(`show more (${lines.length} lines)`, button => {
-						row.ctx.setOpen(key, true);
-						row.refresh(button);
-					}),
-				)
-			: h("div", { class: "code-links" }, h("span", { class: "meta" }, `Showing the first ${DIFF_LINES} of ${lines.length} lines.`), copyAllButton(`Copy all ${lines.length} diff lines`, diff));
-	return h("div", { class: "code-block" }, view, more);
+	if (lines.length <= DIFF_PREVIEW_LINES) return h("div", { class: "code-block" }, view);
+	const apply = (from: Element, expand: boolean, focus: string) => {
+		row.ctx.setOpen(key, expand);
+		row.refresh(from, focus);
+	};
+	const withheld = shown.length < lines.length;
+	const links = open
+		? linksLine(
+				withheld ? h("span", { class: "meta" }, `Showing the first ${DIFF_LINES} of ${lines.length} lines.`) : null,
+				withheld ? copyAllButton(`Copy all ${lines.length} diff lines`, diff) : null,
+				toggleButton("collapse", block, false, apply),
+			)
+		: linksLine(toggleButton(`show more (${lines.length} lines)`, block, true, apply));
+	return h("div", { class: "code-block" }, view, links);
 }

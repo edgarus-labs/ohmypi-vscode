@@ -107,4 +107,39 @@ describe("debug session tracking", () => {
 			/not stopped/,
 		);
 	});
+
+	it("resolves the end wait once every tracked session and every listed one ended, ignoring stops", async () => {
+		let settled = false;
+		const ended = sessions.endAfter(async () => sessions.onEnded("s1"), 1000, signal(), ["s3"]).then(value => {
+			settled = true;
+			return value;
+		});
+		await tick();
+		sessions.onMessage("s2", stopped(4));
+		sessions.onEnded("s2");
+		await tick();
+		assert.equal(settled, false);
+		sessions.onEnded("s3");
+		assert.equal(await ended, true);
+	});
+
+	it("resolves the end wait false when a session still runs after the wait", async () => {
+		assert.equal(await sessions.endAfter(async () => sessions.onEnded("s1"), 20, signal()), false);
+	});
+
+	it("resolves the end wait right after the action when no session runs", async () => {
+		const idle = new DebugSessions<FakeSession>();
+		const ended = idle.endAfter(async () => undefined, 60_000, signal());
+		assert.equal(await Promise.race([ended, tick(50).then(() => "still waiting")]), true);
+	});
+
+	it("rejects the end wait when it is aborted", async () => {
+		const controller = new AbortController();
+		const ended = sessions.endAfter(async () => undefined, 1000, controller.signal);
+		await tick();
+		controller.abort(new Error("cancelled"));
+		await assert.rejects(ended, /cancelled/);
+		sessions.onEnded("s1");
+		sessions.onEnded("s2");
+	});
 });

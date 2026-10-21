@@ -150,6 +150,18 @@ describe("usage buckets", () => {
 		assert.deepEqual(names(GEMINI, swapped).slice(0, 2), ["Gemini — Weekly", "Gemini Argon — Weekly"]);
 	});
 
+	it("keeps the text name when limits of the same name share a used share, as both buckets could be it", () => {
+		const text = GEMINI.replace("9.64% used (90.4% left)", "2.77% used (97.2% left)");
+		const json = GEMINI_JSON.replace("0.09636587", "0.02770454");
+		assert.deepEqual(names(text, json), ["Gemini — Weekly", "Gemini — Weekly", "Gemini — 5 Hour"]);
+	});
+
+	it("renames limits whose equal used shares all name the same bucket", () => {
+		const text = GEMINI.replace("9.64% used (90.4% left)", "2.77% used (97.2% left)");
+		const json = GEMINI_JSON.replace("0.09636587", "0.02770454").replace("gemini-argon-wtu-weekly", "gemini-argon-weekly").replace("gemini-weekly", "gemini-argon-wtu-weekly");
+		assert.deepEqual(names(text, json), ["Gemini Argon — Weekly", "Gemini Argon — Weekly", "Gemini — 5 Hour"]);
+	});
+
 	it("leaves a limit alone when no reported limit has its used share", () => {
 		assert.deepEqual(names(GEMINI, GEMINI_JSON.replace("0.09636587", "0.5")).slice(0, 2), ["Gemini — Weekly", "Gemini — Weekly"]);
 	});
