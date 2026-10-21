@@ -9,7 +9,6 @@ import type { VirtualDocuments } from "../vscode/VirtualDocuments";
 import type { AgentTreeProvider } from "./AgentTreeProvider";
 import type { ChatView } from "./ChatView";
 import { agentSummaryMarkdown, formatBytes, sessionTitle, transcriptToMarkdown } from "./format";
-import type { OmpViewIds } from "./layout";
 import { pickModel } from "./modelPicker";
 import type { ModelPreferences } from "./modelPreferences";
 
@@ -21,7 +20,6 @@ export interface CommandDeps {
 	currentService(): OmpServiceApi | undefined;
 	restart(): Promise<void>;
 	chat: ChatView;
-	viewIds: OmpViewIds;
 	agents: AgentTreeProvider;
 	changes: ChangeTracker;
 	docs: VirtualDocuments;
@@ -152,7 +150,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register("omp.abort", async () => deps.currentService()?.abort()),
 		register("omp.restart", () => deps.restart()),
 		register("omp.openSettings", openOmpSettings),
-		register("omp.showAgents", () => vscode.commands.executeCommand(`${deps.viewIds.agents}.focus`)),
+		register("omp.showAgents", () => vscode.commands.executeCommand("omp.agents.focus")),
 		register("omp.addFileToChat", async (uri?: vscode.Uri, selected?: vscode.Uri[]) => {
 			const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
 			const uris = Array.isArray(selected) && selected.length > 0 ? selected : target ? [target] : [];

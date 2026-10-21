@@ -199,7 +199,7 @@ export class InteractionsView {
 		} else {
 			this.element.append(el);
 			this.#deps.announce(`OMP asks: ${title}`);
-			if (!this.#deps.composerHasFocus()) el.querySelector<HTMLElement>("button, input, textarea")?.focus();
+			if (!this.#userIsTyping()) el.querySelector<HTMLElement>("button, input, textarea")?.focus();
 		}
 		if (pending.expiresAt) {
 			this.#expiries.set(request.id, pending.expiresAt);
@@ -208,6 +208,16 @@ export class InteractionsView {
 			this.#expiries.delete(request.id);
 		}
 		this.#tick();
+	}
+
+	/** True while focus is in the composer, a text-entry control, or the cards themselves, so a new card must not take it. */
+	#userIsTyping(): boolean {
+		if (this.#deps.composerHasFocus()) return true;
+		const active = document.activeElement;
+		if (!active) return false;
+		if (this.element.contains(active)) return true;
+		const contentEditable = active.getAttribute("contenteditable");
+		return active.tagName === "INPUT" || active.tagName === "TEXTAREA" || (contentEditable !== null && contentEditable !== "false");
 	}
 
 	/** Drops the card; focus on it moves to the composer. */

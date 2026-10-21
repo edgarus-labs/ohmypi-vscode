@@ -17,7 +17,7 @@ function repositoryRoot(): string {
 
 /**
  * `--vscode-version=<version>` (or `OMP_IT_VSCODE_VERSION`); `min` is the lowest
- * release `engines.vscode` admits, e.g. `1.95.0` for `^1.95.0`.
+ * release `engines.vscode` admits, e.g. `1.106.0` for `^1.106.0`.
  */
 function vscodeVersion(root: string): string {
 	const requested = process.argv.find(arg => arg.startsWith("--vscode-version="))?.slice("--vscode-version=".length) ?? process.env.OMP_IT_VSCODE_VERSION ?? DEFAULT_VSCODE_VERSION;

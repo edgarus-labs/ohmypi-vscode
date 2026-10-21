@@ -1816,6 +1816,12 @@ body.vscode-high-contrast .slash-option:hover {
 	outline-offset: -1px;
 }
 
+/* High contrast themes define no list selection fills: the keyboard-selected slash row gets a solid outline. */
+body.vscode-high-contrast .slash-option[aria-selected="true"] {
+	outline: 1px solid var(--vscode-contrastActiveBorder);
+	outline-offset: -1px;
+}
+
 @container (max-width: 420px) {
 	.usage-text {
 		display: none;

@@ -576,6 +576,7 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 		const variables: format.VariableInfo[] = [];
 		const scopes = records(await session.customRequest("scopes", { frameId }), "scopes");
 		for (const scope of scopes) {
+			if (variables.length >= MAX_LOCALS) break;
 			if (scope.expensive === true || typeof scope.variablesReference !== "number" || scope.variablesReference <= 0) continue;
 			for (const variable of records(await session.customRequest("variables", { variablesReference: scope.variablesReference }), "variables")) {
 				if (variables.length >= MAX_LOCALS) break;
@@ -611,10 +612,15 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 		const command = args.requiredString("command");
 		const raw = args.optionalString("arguments");
 		const commandArgs = raw === undefined ? [] : parseCommandArguments(raw);
-		if (!(await vscode.commands.getCommands()).includes(command)) {
-			throw new Error(`Unknown command '${command}'. Use vscode_find_commands to look up command ids.`);
+		let result: unknown;
+		try {
+			result = await vscode.commands.executeCommand(command, ...commandArgs);
+		} catch (error) {
+			if (errorMessage(error) === `command '${command}' not found`) {
+				throw new Error(`Unknown command '${command}'. Use vscode_find_commands to look up command ids.`);
+			}
+			throw error;
 		}
-		const result: unknown = await vscode.commands.executeCommand(command, ...commandArgs);
 		const executed = raw === undefined ? `Executed ${command}.` : `Executed ${command} with arguments ${raw}.`;
 		if (result === undefined) return executed;
 		let json: string | undefined;

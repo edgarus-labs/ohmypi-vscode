@@ -6,7 +6,7 @@ The extension is a frontend only. OMP remains the runtime and the source of trut
 
 ## Requirements
 
-- VS Code 1.95 or newer, locally or in a remote extension host.
+- VS Code 1.106 or newer, locally or in a remote extension host.
 - A trusted workspace: in Restricted Mode the extension does not start OMP. Trusting the workspace starts OMP.
 - A folder on disk, local or remote. Virtual workspaces (for example GitHub Repositories in the browser) are not supported.
 - An installed and configured OMP (`omp`, tested with 18.5.1). Configure providers, logins and models with OMP itself, for example by running `omp` once in a terminal. The extension has no provider settings and stores no credentials.
@@ -43,8 +43,6 @@ OMP lives in its own panel in the **Secondary Side Bar** on the right, like Clau
 - **Chat**: the conversation and the input box. The section title bar has New Session, Session History and Abort (while busy); Rename, Open Session, Restart, Show Log and Settings are in its `...` menu.
 - **Agents** (collapsed by default): one row per agent, labelled with the subagent's OMP name (`ReviewAuth  scout · running · read src/auth.ts`), subagents nested under their parent, running agents first. The section title shows how many are running.
 - **Changes** (collapsed by default): one row per file changed by OMP, with status, folder and line counts (`M · src/auth · +3 −1`). Click a file for VS Code's native diff in the editor area. Starting a new session clears the list and closes its diff editors.
-
-On VS Code older than 1.106, which has no extension containers in the Secondary Side Bar, the same panel appears in the Activity Bar on the left; drag it to the right with `Move To > Secondary Side Bar` if you prefer.
 
 ## Features
 

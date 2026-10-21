@@ -23,7 +23,6 @@ describe("registerCommands", () => {
 			currentService: () => service as OmpServiceApi,
 			restart: async () => {},
 			chat: {},
-			viewIds: { chat: "omp.chat", agents: "omp.agents", changes: "omp.changes" },
 			agents: { current: [], find: () => undefined },
 			changes: {},
 			docs: {},

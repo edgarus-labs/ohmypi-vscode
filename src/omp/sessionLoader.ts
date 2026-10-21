@@ -73,16 +73,21 @@ export class SessionLoader {
 		return undefined;
 	}
 
-	/** Snapshot state, thinking levels, history and subagents after (re)binding a session. */
+	/** Snapshot state, thinking levels, history and subagents after (re)binding a session; a failure after the state leaves an empty transcript. */
 	async load(client: OmpRpcClient): Promise<void> {
 		this.#store.applyState(await client.request("get_state"));
-		const { levels } = await client.request("get_available_thinking_levels");
-		const { model, thinkingLevel } = this.#store.session;
-		this.#store.update({
-			availableThinkingLevels: selectableLevels(levels, model?.reasoning === true),
-			thinkingSelector: await journaledThinkingSelector(client, thinkingLevel, this.#logger),
-		});
-		this.#store.reset(await this.#loadMessages(client));
+		try {
+			const { levels } = await client.request("get_available_thinking_levels");
+			const { model, thinkingLevel } = this.#store.session;
+			this.#store.update({
+				availableThinkingLevels: selectableLevels(levels, model?.reasoning === true),
+				thinkingSelector: await journaledThinkingSelector(client, thinkingLevel, this.#logger),
+			});
+			this.#store.reset(await this.#loadMessages(client));
+		} catch (error) {
+			this.#store.reset([]);
+			throw error;
+		}
 		this.#agents.clearSubagents();
 		const { subagents } = await client.request("get_subagents");
 		this.#agents.applySnapshot(subagents);

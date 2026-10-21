@@ -1,48 +1,47 @@
 import * as assert from "node:assert/strict";
 import manifest from "../../../package.json";
-import { chatViewIds, LAYOUT_CONTEXT, layoutContextValue, supportsSecondarySidebar } from "../../../src/ui/layout";
 
 interface ManifestView {
 	id: string;
+	type?: string;
 	when?: string;
 }
 
-describe("secondary sidebar support", () => {
-	it("requires VS Code 1.106 or newer", () => {
-		assert.equal(supportsSecondarySidebar("1.105.1"), false);
-		assert.equal(supportsSecondarySidebar("1.106.0"), true);
-		assert.equal(supportsSecondarySidebar("1.140.0-insider"), true);
-		assert.equal(supportsSecondarySidebar("2.0.0"), true);
-	});
-
-	it("treats an unparsable version as unsupported", () => {
-		assert.equal(supportsSecondarySidebar("insiders"), false);
-	});
-
-	it("selects the view ids of the active container", () => {
-		assert.deepEqual(chatViewIds(true), { chat: "omp.chat", agents: "omp.agents", changes: "omp.changes" });
-		assert.deepEqual(chatViewIds(false), { chat: "omp.chatSidebar", agents: "omp.agentsSidebar", changes: "omp.changesSidebar" });
-	});
-});
+const containers = manifest.contributes.viewsContainers as Record<string, Array<{ id: string }>>;
+const views = manifest.contributes.views as Record<string, ManifestView[]>;
 
 describe("view containers in the manifest", () => {
-	const views = manifest.contributes.views as Record<string, ManifestView[]>;
+	it("requires VS Code 1.106, the first release that honors viewsContainers.secondarySidebar", () => {
+		const match = /^\^(\d+)\.(\d+)\.\d+$/.exec(manifest.engines.vscode);
+		assert.ok(match, `engines.vscode ${manifest.engines.vscode} is not a caret range`);
+		assert.ok(Number(match[1]) > 1 || (Number(match[1]) === 1 && Number(match[2]) >= 106));
+	});
 
-	it("shows each container's views only once the host has chosen that container", () => {
+	it("contributes only a Secondary Side Bar container", () => {
+		assert.deepEqual(Object.keys(containers), ["secondarySidebar"]);
+	});
+
+	it("puts every view in an existing container, without visibility conditions", () => {
+		const ids = Object.values(containers).flatMap(list => list.map(container => container.id));
+		assert.deepEqual(Object.keys(views).sort(), [...ids].sort());
 		assert.deepEqual(
-			views["omp-panel"].map(view => [view.id, view.when]),
-			Object.values(chatViewIds(true)).map(id => [id, `${LAYOUT_CONTEXT} == ${layoutContextValue(true)}`]),
+			Object.values(views).flat().map(view => [view.id, view.type ?? "tree", view.when]),
+			[
+				["omp.chat", "webview", undefined],
+				["omp.agents", "tree", undefined],
+				["omp.changes", "tree", undefined],
+			],
 		);
-		assert.deepEqual(
-			views.omp.map(view => [view.id, view.when]),
-			Object.values(chatViewIds(false)).map(id => [id, `${LAYOUT_CONTEXT} == ${layoutContextValue(false)}`]),
-		);
-		assert.notEqual(layoutContextValue(true), layoutContextValue(false));
 	});
 
 	it("declares only the properties VS Code reads on a view container", () => {
-		for (const containers of Object.values(manifest.contributes.viewsContainers)) {
-			for (const container of containers) assert.deepEqual(Object.keys(container).sort(), ["icon", "id", "title"]);
+		for (const list of Object.values(containers)) {
+			for (const container of list) assert.deepEqual(Object.keys(container).sort(), ["icon", "id", "title"]);
 		}
+	});
+
+	it("gives a welcome text only to views that exist", () => {
+		const viewIds = new Set(Object.values(views).flat().map(view => view.id));
+		for (const welcome of manifest.contributes.viewsWelcome) assert.ok(viewIds.has(welcome.view), welcome.view);
 	});
 });

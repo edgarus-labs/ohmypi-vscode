@@ -42,6 +42,23 @@ describe("InteractionsView", () => {
 		assert.equal(focused.length, 0);
 	});
 
+	it("leaves focus in another card's text field while the user is typing there", () => {
+		view.add({ request: { id: "i1", kind: "input", title: "Name?" } });
+		const typing = view.element.querySelector("input");
+		assert.ok(typing);
+		typing.focus();
+		view.add({ request: { id: "c1", kind: "confirm", title: "Proceed?" } });
+		assert.equal(document.activeElement, typing);
+	});
+
+	it("leaves focus on a text field outside the cards while the user is typing there", () => {
+		const outside = document.createElement("textarea");
+		document.body.append(outside);
+		outside.focus();
+		view.add({ request: { id: "c1", kind: "confirm", title: "Proceed?" } });
+		assert.equal(document.activeElement, outside);
+	});
+
 	it("returns focus to the composer when an answer is sent", () => {
 		view.add({ request: { id: "c1", kind: "confirm", title: "Proceed?" } });
 		click([...view.element.querySelectorAll("button")].find(button => button.textContent === "Approve"));

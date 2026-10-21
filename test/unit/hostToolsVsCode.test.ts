@@ -77,6 +77,31 @@ describe("VS Code host tools", () => {
 		});
 	});
 
+	describe("vscode_execute_command", () => {
+		it("runs a command that getCommands does not list yet, since executeCommand activates its extension", async () => {
+			stub.on("commands.getCommands", () => []);
+			stub.on("commands.executeCommand", () => undefined);
+			assert.equal(await invoke("vscode_execute_command", { command: "lazy.ext.run" }), "Executed lazy.ext.run.");
+			assert.deepEqual(stub.callsTo("commands.executeCommand"), [["lazy.ext.run"]]);
+		});
+
+		it("points to vscode_find_commands when VS Code reports the command as not found", async () => {
+			stub.on("commands.executeCommand", () => {
+				throw new Error("command 'no.such' not found");
+			});
+			await assert.rejects(invoke("vscode_execute_command", { command: "no.such" }), {
+				message: "Unknown command 'no.such'. Use vscode_find_commands to look up command ids.",
+			});
+		});
+
+		it("propagates any other failure unchanged", async () => {
+			stub.on("commands.executeCommand", () => {
+				throw new Error("boom");
+			});
+			await assert.rejects(invoke("vscode_execute_command", { command: "some.cmd" }), { message: "boom" });
+		});
+	});
+
 	describe("vscode_debug", () => {
 		const frames = { stackFrames: [{ id: 1, name: "main", line: 3, source: { path: "/work/repo/app.js" } }] };
 		const resuming = new Set(["continue", "next", "stepIn", "stepOut"]);
@@ -126,6 +151,22 @@ describe("VS Code host tools", () => {
 			assert.equal(await result, "Debugger: not running.");
 			assert.deepEqual(stub.callsTo("debug.stopDebugging"), [[]]);
 			assert.deepEqual(requests, []);
+		});
+
+		it("stops requesting variables once the locals cap is reached", async () => {
+			const many = Array.from({ length: 500 }, (_, i) => ({ name: `v${i}`, value: "1" }));
+			const variableRequests: unknown[] = [];
+			session.customRequest = async (command, args) => {
+				if (command === "stackTrace") return frames;
+				if (command === "scopes") return { scopes: [{ variablesReference: 1 }, { variablesReference: 2 }] };
+				if (command === "variables") {
+					variableRequests.push(args);
+					return { variables: many };
+				}
+				return {};
+			};
+			await invoke("vscode_debug_inspect", { kind: "locals" });
+			assert.equal(variableRequests.length, 1);
 		});
 	});
 

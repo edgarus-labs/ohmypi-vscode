@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- VS Code 1.106 or newer is required. The Activity Bar fallback for older versions is removed: its `viewsContainers.secondarySidebar` contribution is a proposed API before 1.106 and broke every view container of the extension on 1.104–1.105. The Chat, Agents and Changes views are only in the Secondary Side Bar, and the `omp.layout` context key and the `omp.chatSidebar`, `omp.agentsSidebar` and `omp.changesSidebar` views are gone. `npm run test:integration:min` now runs against VS Code 1.106.0.
+
 ## 0.6.0
 
 - OMP's agent can operate VS Code through `vscode_*` host tools, registered on every OMP start: workspace and open editors; open, read (including unsaved edits), edit (in the buffer, with undo), save and close documents; the selection; Problems diagnostics; listing and running tasks with their exit code and errors; starting, stepping and inspecting the debugger and managing breakpoints; finding and running VS Code commands. Paths must lie inside OMP's working directory or a workspace folder. OMP's `host_tool_cancel` cancels a call, calls in flight are cancelled when OMP stops, and results are capped at 40,000 characters.
@@ -74,7 +78,6 @@
 - A status row at the end of the conversation shows that the agent is working (state, elapsed time, output tokens), and each finished turn gets a summary line with its duration, tokens and cost. The per-reply line shows the model; tokens and cost moved to its tooltip.
 - File names in replies and file-tool rows open the file in the editor; bare names are searched in the workspace.
 - The chat lists the most recent sessions while the conversation is empty, with a link to the full session history.
-- The extension runs in remote extension hosts on VS Code 1.95–1.100 (Node 20) again.
 - Workspace trust: in Restricted Mode OMP is not started and `omp.executablePath` / `omp.extraArgs` from workspace settings are ignored. `omp.executablePath` must be absolute (or start with `~`); on Windows it must be a `.exe`, `.com`, `.cmd` or `.bat` file, and an extensionless `omp` shim on `PATH` is no longer picked. Invalid `omp.extraArgs` values are rejected with an error.
 - Change tracking and file links stay inside the workspace: tool paths outside OMP's working directory and the workspace folders are not read, and opening such a file or diff asks first. Editor context no longer lists open editors outside the workspace folders.
 - Failures are visible: an unexpected OMP exit, each restart and running out of restarts show a chat notice and a notification with Restart and Show Log, including OMP's last stderr lines and pid. Failures to open files or diffs, deliver an answer, steer an agent or search workspace files are shown instead of only logged. A UI request that cannot be shown is cancelled so OMP stops waiting.

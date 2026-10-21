@@ -32,7 +32,7 @@ export class SlashPopup {
 	}
 
 	setCommands(commands: readonly SlashCommandView[]): void {
-		if (commands === this.#commands) return;
+		if (sameCommands(commands, this.#commands)) return;
 		this.#commands = commands;
 		if (this.#menu) this.refresh();
 	}
@@ -129,4 +129,27 @@ export class SlashPopup {
 		this.#onEdit();
 		this.refresh();
 	}
+}
+
+function sameCommands(a: readonly SlashCommandView[], b: readonly SlashCommandView[]): boolean {
+	if (a === b) return true;
+	return (
+		a.length === b.length &&
+		a.every((command, index) => {
+			const other = b[index];
+			return (
+				command.name === other.name &&
+				command.source === other.source &&
+				command.description === other.description &&
+				command.hint === other.hint &&
+				command.aliases.length === other.aliases.length &&
+				command.aliases.every((alias, i) => alias === other.aliases[i]) &&
+				command.subcommands.length === other.subcommands.length &&
+				command.subcommands.every((sub, i) => {
+					const otherSub = other.subcommands[i];
+					return sub.name === otherSub.name && sub.description === otherSub.description && sub.usage === otherSub.usage;
+				})
+			);
+		})
+	);
 }

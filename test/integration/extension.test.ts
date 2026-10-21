@@ -5,7 +5,6 @@ import * as vscode from "vscode";
 import type { OmpExtensionApi } from "../../src/extension";
 import type { InteractionRequest, OmpServiceApi, SessionView } from "../../src/omp/api";
 import { deferred } from "../../src/shared/deferred";
-import { supportsSecondarySidebar } from "../../src/ui/layout";
 import type { RenderedReport } from "../../src/webview/protocol";
 
 /** The suite starts only once OMP is ready, so the service is always present. */
@@ -87,8 +86,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 	});
 
 	it("omp.sendPrompt reveals a hidden chat view and renders it", async () => {
-		const sideBar = supportsSecondarySidebar(vscode.version) ? "workbench.action.closeAuxiliaryBar" : "workbench.action.closeSidebar";
-		await vscode.commands.executeCommand(sideBar);
+		await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
 		await until("chat hidden", () => !api.chat.visible);
 		const { promise: rendered, resolve } = deferred<RenderedReport>();
 		const sub = api.chat.onDidRender(report => {

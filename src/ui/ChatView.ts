@@ -81,7 +81,7 @@ export interface ChatHost {
 	dismissTodos(key: string): Promise<void>;
 }
 
-/** The OMP chat: a webview view in the Secondary Sidebar (Activity Bar on VS Code < 1.106). */
+/** The OMP chat: a webview view in the Secondary Sidebar. */
 export class ChatView implements vscode.WebviewViewProvider, InteractionSurface, vscode.Disposable {
 	/** Latest render report posted by the webview (integration-test hook; only with test hooks on). */
 	lastRendered: RenderedReport | undefined;

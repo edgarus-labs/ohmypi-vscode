@@ -15,7 +15,7 @@
   "homepage": "https://github.com/edgarus-labs/ohmypi-vscode#readme",
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.95.0",
+    "vscode": "^1.106.0",
     "node": ">=22.12"
   },
   "categories": [
@@ -44,13 +44,6 @@
           "title": "OMP",
           "icon": "media/omp.svg"
         }
-      ],
-      "activitybar": [
-        {
-          "id": "omp",
-          "title": "OMP",
-          "icon": "media/omp.svg"
-        }
       ]
     },
     "views": {
@@ -58,40 +51,17 @@
         {
           "type": "webview",
           "id": "omp.chat",
-          "name": "Chat",
-          "when": "omp.layout == secondarySidebar"
+          "name": "Chat"
         },
         {
           "id": "omp.agents",
           "name": "Agents",
-          "visibility": "collapsed",
-          "when": "omp.layout == secondarySidebar"
+          "visibility": "collapsed"
         },
         {
           "id": "omp.changes",
           "name": "Changes",
-          "visibility": "collapsed",
-          "when": "omp.layout == secondarySidebar"
-        }
-      ],
-      "omp": [
-        {
-          "type": "webview",
-          "id": "omp.chatSidebar",
-          "name": "Chat",
-          "when": "omp.layout == activityBar"
-        },
-        {
-          "id": "omp.agentsSidebar",
-          "name": "Agents",
-          "visibility": "collapsed",
-          "when": "omp.layout == activityBar"
-        },
-        {
-          "id": "omp.changesSidebar",
-          "name": "Changes",
-          "visibility": "collapsed",
-          "when": "omp.layout == activityBar"
+          "visibility": "collapsed"
         }
       ]
     },
@@ -417,15 +387,7 @@
         "contents": "No agents yet."
       },
       {
-        "view": "omp.agentsSidebar",
-        "contents": "No agents yet."
-      },
-      {
         "view": "omp.changes",
-        "contents": "No changes yet. Files edited by OMP appear here."
-      },
-      {
-        "view": "omp.changesSidebar",
         "contents": "No changes yet. Files edited by OMP appear here."
       }
     ]
@@ -445,7 +407,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.19.43",
-    "@types/vscode": "1.95.0",
+    "@types/vscode": "1.106.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",

@@ -94,6 +94,17 @@ describe("Composer slash command autocomplete", () => {
 		assert.equal(composer.input.getAttribute("aria-activedescendant"), composer.element.querySelector('[aria-selected="true"]')?.id);
 	});
 
+	it("keeps the active row when the host re-sends the same commands", () => {
+		type("/");
+		key("ArrowDown");
+		const activeId = composer.input.getAttribute("aria-activedescendant");
+		composer.setCommands(structuredClone(COMMANDS));
+		assert.equal(activeName(), "/effort");
+		assert.equal(composer.input.getAttribute("aria-activedescendant"), activeId);
+		key("Enter");
+		assert.equal(composer.input.value, "/effort ");
+	});
+
 	it("inserts the active command on Enter without sending and keeps focus", () => {
 		type("/mo");
 		const enter = key("Enter");

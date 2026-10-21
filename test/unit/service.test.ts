@@ -731,6 +731,37 @@ describe("OmpService against an in-memory OMP", () => {
 		assert.match(logger.text("debug"), /changed while loading/);
 	});
 
+	it("shows the switched-to session with an empty transcript when its history fails to load", async () => {
+		let switched = false;
+		const fail = (frame: Record<string, unknown>, omp: MemoryOmp) => {
+			if (!switched) return frame.type === "get_messages_page" ? { messages: [user("old")], totalMessages: 1 } : { messages: [user("old")] };
+			omp.emit({ type: "response", id: frame.id, command: frame.type, success: false, error: "history unavailable" });
+			return NO_REPLY;
+		};
+		const omp = new MemoryOmp({
+			get_state: () => ({
+				sessionId: switched ? "new" : "old",
+				sessionFile: switched ? "/sessions/new.jsonl" : "/sessions/old.jsonl",
+				thinkingLevel: "off",
+				isStreaming: false,
+				isCompacting: false,
+				messageCount: switched ? 2 : 1,
+			}),
+			switch_session: () => {
+				switched = true;
+				return { cancelled: false };
+			},
+			get_messages_page: fail,
+			get_messages: fail,
+		});
+		const { service } = create(omp);
+		await service.start();
+		assert.equal(service.transcript.length, 1);
+		await assert.rejects(service.switchSession("/sessions/new.jsonl"), /history unavailable/);
+		assert.equal(service.session.sessionFile, "/sessions/new.jsonl");
+		assert.deepEqual(service.transcript, []);
+	});
+
 	it("hands the cause of a failed optional setup step to the logger", async () => {
 		const omp = new MemoryOmp({
 			set_event_filter: (frame, transport) => {

@@ -9,7 +9,6 @@ import { AgentTreeProvider } from "./ui/AgentTreeProvider";
 import { ChatView } from "./ui/ChatView";
 import { registerCommands } from "./ui/commands";
 import { InteractionController, PresentationHandler } from "./ui/interactions";
-import { chatViewIds, LAYOUT_CONTEXT, layoutContextValue, type OmpViewIds, supportsSecondarySidebar } from "./ui/layout";
 import { ModelPreferences } from "./ui/modelPreferences";
 import { ServiceSupervisor } from "./ui/ServiceSupervisor";
 import { OmpStatusBar } from "./ui/StatusBar";
@@ -52,7 +51,6 @@ class OmpHost implements vscode.Disposable {
 	private readonly presentations: PresentationHandler;
 	private readonly statusBar = new OmpStatusBar();
 	private readonly docs = new VirtualDocuments();
-	private readonly viewIds: OmpViewIds;
 	private readonly agentsView: vscode.TreeView<unknown>;
 	private readonly changesView: vscode.TreeView<unknown>;
 	private readonly hostTools = new VsCodeHostTools(() => this.supervisor.service?.cwd ?? workingDirectory());
@@ -62,14 +60,11 @@ class OmpHost implements vscode.Disposable {
 		output: vscode.OutputChannel,
 		private readonly logger: Logger,
 	) {
-		const secondary = supportsSecondarySidebar(vscode.version);
-		void vscode.commands.executeCommand("setContext", LAYOUT_CONTEXT, layoutContextValue(secondary));
-		this.viewIds = chatViewIds(secondary);
 		this.changes = new ChangeTracker(logger);
 		const todoDismissals = new TodoDismissals(context.globalState);
 		this.chat = new ChatView(
 			context.extensionUri,
-			this.viewIds.chat,
+			"omp.chat",
 			logger,
 			{
 				ensureService: () => this.supervisor.ensureService(),
@@ -84,8 +79,8 @@ class OmpHost implements vscode.Disposable {
 		);
 		this.interactions = new InteractionController(this.chat, logger);
 		this.presentations = new PresentationHandler(this.chat, logger);
-		this.agentsView = vscode.window.createTreeView(this.viewIds.agents, { treeDataProvider: this.agents, showCollapseAll: true });
-		this.changesView = vscode.window.createTreeView(this.viewIds.changes, { treeDataProvider: this.changes });
+		this.agentsView = vscode.window.createTreeView("omp.agents", { treeDataProvider: this.agents, showCollapseAll: true });
+		this.changesView = vscode.window.createTreeView("omp.changes", { treeDataProvider: this.changes });
 		this.agentsView.description = this.agents.summary() || undefined;
 		this.changesView.description = this.changes.summary() || undefined;
 		const viewMessages = {
@@ -117,7 +112,7 @@ class OmpHost implements vscode.Disposable {
 			this.changesView,
 			this.agents.onDidChangeSummary(summary => (this.agentsView.description = summary || undefined)),
 			this.changes.onDidChangeSummary(summary => (this.changesView.description = summary || undefined)),
-			vscode.window.registerWebviewViewProvider(this.viewIds.chat, this.chat, { webviewOptions: { retainContextWhenHidden: true } }),
+			vscode.window.registerWebviewViewProvider("omp.chat", this.chat, { webviewOptions: { retainContextWhenHidden: true } }),
 			vscode.workspace.registerTextDocumentContentProvider(BASELINE_SCHEME, this.changes.contentProvider),
 			vscode.workspace.registerTextDocumentContentProvider(DOC_SCHEME, this.docs),
 			vscode.workspace.onDidChangeConfiguration(event => this.onConfigurationChanged(event)),
@@ -127,7 +122,6 @@ class OmpHost implements vscode.Disposable {
 				currentService: () => this.supervisor.service,
 				restart: () => this.supervisor.restart(),
 				chat: this.chat,
-				viewIds: this.viewIds,
 				agents: this.agents,
 				changes: this.changes,
 				docs: this.docs,
