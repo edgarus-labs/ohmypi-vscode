@@ -186,16 +186,17 @@ function newSession() {
 		fs.mkdirSync(sessionDir, { recursive: true });
 		const timestamp = new Date().toISOString();
 		state.sessionFile = path.join(sessionDir, `${timestamp.replace(/[:.]/g, "-")}_${state.sessionId}.jsonl`);
-		fs.writeFileSync(
-			state.sessionFile,
-			`${JSON.stringify({ type: "session", version: 3, id: state.sessionId, cwd: process.cwd(), timestamp })}\n`,
-		);
+		fs.writeFileSync(state.sessionFile, `${JSON.stringify({ type: "session", version: 3, id: state.sessionId, cwd: process.cwd(), timestamp })}\n`);
 	}
 	journalThinking();
 }
 
 function loadSession(file) {
-	const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+	const lines = fs
+		.readFileSync(file, "utf8")
+		.split("\n")
+		.filter(Boolean)
+		.map(line => JSON.parse(line));
 	const header = lines.find(entry => entry.type === "session");
 	if (!header) throw new Error(`Not a session file: ${file}`);
 	state.sessionId = header.id;
@@ -272,7 +273,7 @@ async function scenarioHostTool(text, run) {
  * under the same tool call id, as OMP does. `executeFirst` changes the file before any of these frames,
  * as when a host receives events late.
  */
-async function runTool(run, name, args, execute, { executeFirst = false, intro } = {}) {
+async function runTool(_run, name, args, execute, { executeFirst = false, intro } = {}) {
 	const toolCallId = nextId("call");
 	const early = executeFirst ? execute() : undefined;
 	const call = assistantMessage([...(intro ? [{ type: "text", text: intro }] : []), { type: "toolCall", id: toolCallId, name, arguments: args }], {
@@ -369,19 +370,38 @@ async function scenarioSubagent(run) {
 	for (const [index, id] of ids.entries()) {
 		const sessionFile = path.join(sessionDir, `${state.sessionId}`, `${id}.jsonl`);
 		fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-		const messages = [
-			{ role: "user", content: `Task for ${id}`, timestamp: Date.now() },
-			assistantMessage([{ type: "text", text: `${id} reporting` }]),
-		];
+		const messages = [{ role: "user", content: `Task for ${id}`, timestamp: Date.now() }, assistantMessage([{ type: "text", text: `${id} reporting` }])];
 		fs.writeFileSync(sessionFile, messages.map(message => `${JSON.stringify({ type: "message", message })}\n`).join(""));
 		const snapshot = { id, index, agent: "task", agentSource: "bundled", status: "running", lastUpdate: Date.now(), description: `Fake ${id}`, sessionFile };
 		state.subagents.set(id, snapshot);
-		emit({ type: "subagent_lifecycle", payload: { id, agent: "task", agentSource: "bundled", status: "started", index, description: `Fake ${id}`, sessionFile } });
+		emit({
+			type: "subagent_lifecycle",
+			payload: { id, agent: "task", agentSource: "bundled", status: "started", index, description: `Fake ${id}`, sessionFile },
+		});
 	}
 	await sleep(20);
 	for (const [index, id] of ids.entries()) {
-		const progress = { index, id, agent: "task", agentSource: "bundled", status: "running", task: `Task for ${id}`, currentTool: "grep", recentTools: [], recentOutput: [], toolCount: 2, requests: 1, tokens: 500, cost: 0.002, durationMs: 20, resolvedModel: `${state.model.provider}/${state.model.id}` };
-		emit({ type: "subagent_progress", payload: { index, agent: "task", agentSource: "bundled", task: `Task for ${id}`, progress, sessionFile: state.subagents.get(id).sessionFile } });
+		const progress = {
+			index,
+			id,
+			agent: "task",
+			agentSource: "bundled",
+			status: "running",
+			task: `Task for ${id}`,
+			currentTool: "grep",
+			recentTools: [],
+			recentOutput: [],
+			toolCount: 2,
+			requests: 1,
+			tokens: 500,
+			cost: 0.002,
+			durationMs: 20,
+			resolvedModel: `${state.model.provider}/${state.model.id}`,
+		};
+		emit({
+			type: "subagent_progress",
+			payload: { index, agent: "task", agentSource: "bundled", task: `Task for ${id}`, progress, sessionFile: state.subagents.get(id).sessionFile },
+		});
 	}
 	await sleep(20);
 	for (const [index, id] of ids.entries()) {
@@ -398,7 +418,14 @@ async function scenarioPresent(run) {
 	send({ type: "extension_ui_request", id: nextId("ui"), method: "notify", message: "Heads up", notifyType: "warning" });
 	send({ type: "extension_ui_request", id: nextId("ui"), method: "setStatus", statusKey: "fake", statusText: "busy" });
 	send({ type: "extension_ui_request", id: nextId("ui"), method: "setStatus", statusKey: "fake" });
-	send({ type: "extension_ui_request", id: nextId("ui"), method: "open_url", url: "https://fake.invalid/login", launchUrl: "https://fake.invalid/launch", instructions: "Sign in" });
+	send({
+		type: "extension_ui_request",
+		id: nextId("ui"),
+		method: "open_url",
+		url: "https://fake.invalid/login",
+		launchUrl: "https://fake.invalid/launch",
+		instructions: "Sign in",
+	});
 	send({ type: "extension_ui_request", id: nextId("ui"), method: "set_editor_text", text: "draft text" });
 	send({ type: "notice", level: "info", message: "Fake notice", source: "fake" });
 	send({ type: "auto_compaction_start", reason: "threshold", action: "compact" });
@@ -410,7 +437,13 @@ async function scenarioPresent(run) {
 	send({ type: "config_update", thinkingLevel: state.thinkingLevel });
 	const toolCallId = nextId("call");
 	send({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } });
-	send({ type: "tool_execution_update", toolCallId, toolName: "bash", args: { command: "ls" }, partialResult: { content: [{ type: "text", text: "streamed line" }] } });
+	send({
+		type: "tool_execution_update",
+		toolCallId,
+		toolName: "bash",
+		args: { command: "ls" },
+		partialResult: { content: [{ type: "text", text: "streamed line" }] },
+	});
 	await sleep(5);
 	send({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "a\nb" }] }, isError: false });
 	return streamAssistant("Presented.", run);
@@ -436,7 +469,14 @@ function startPrompt(id, text) {
 		process.stderr.write(`fake-omp prompt ${id} failed: ${error?.stack ?? error}\n`);
 		state.running = undefined;
 		send({ type: "agent_end", messages: [], isTerminal: true, yielded: true });
-		send({ type: "prompt_result", id, agentInvoked: true, status: "error", sessionSettled: true, error: { message: String(error?.message ?? error), retryable: false } });
+		send({
+			type: "prompt_result",
+			id,
+			agentInvoked: true,
+			status: "error",
+			sessionSettled: true,
+			error: { message: String(error?.message ?? error), retryable: false },
+		});
 		send({ type: "session_settled" });
 	});
 }
@@ -464,7 +504,13 @@ async function runPrompt(id, text) {
 	} else if (/\bslow\b/.test(text)) {
 		await scenarioSlow(run);
 	} else if (/\bapprove\b/.test(text)) {
-		const answer = await waitForUi({ id: nextId("ui"), method: "confirm", title: "Approve fake action?", message: "The fake agent wants to proceed.", timeout: 60000 });
+		const answer = await waitForUi({
+			id: nextId("ui"),
+			method: "confirm",
+			title: "Approve fake action?",
+			message: "The fake agent wants to proceed.",
+			timeout: 60000,
+		});
 		const decision = answer.cancelled ? "Cancelled" : answer.confirmed ? "Approved" : "Denied";
 		await streamAssistant(`Decision: ${decision}`, run);
 	} else if (/\binput\b/.test(text)) {
@@ -488,7 +534,14 @@ async function runPrompt(id, text) {
 			});
 			await streamAssistant(`Answers: ${JSON.stringify(answer.answers ?? "cancelled")}`, run);
 		} else {
-			const answer = await waitForUi({ id: nextId("ui"), method: "select", title: "Which database?", options: ["Postgres", "SQLite"], optionDetails: [{}, { description: "Embedded" }], timeout: 60000 });
+			const answer = await waitForUi({
+				id: nextId("ui"),
+				method: "select",
+				title: "Which database?",
+				options: ["Postgres", "SQLite"],
+				optionDetails: [{}, { description: "Embedded" }],
+				timeout: 60000,
+			});
 			await streamAssistant(`Selected: ${answer.value ?? "cancelled"}`, run);
 		}
 	} else if (/\bsubagent\b/.test(text)) {
@@ -629,7 +682,11 @@ function handle(frame) {
 		case "get_subagent_messages": {
 			const file = state.subagents.get(frame.subagentId)?.sessionFile ?? state.finishedSubagentFiles?.get(frame.subagentId);
 			if (!file) return fail(type, id, `Unknown subagent or session file unavailable: ${frame.subagentId}`);
-			const messages = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line).message);
+			const messages = fs
+				.readFileSync(file, "utf8")
+				.split("\n")
+				.filter(Boolean)
+				.map(line => JSON.parse(line).message);
 			return respond(type, id, { sessionFile: file, fromByte: 0, nextByte: 0, reset: false, entries: [], messages });
 		}
 		case "cancel_subagent": {

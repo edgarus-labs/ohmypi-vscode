@@ -13,7 +13,9 @@ describe("tokenize", () => {
 		const code = 'const a = "x"; // done\nlet b = 2;';
 		const tokens = tokenize(code, "ts");
 		assert.equal(tokens.map(token => code.slice(token.start, token.end)).join(""), code);
-		tokens.slice(1).forEach((token, index) => assert.equal(token.start, tokens[index].end));
+		tokens.slice(1).forEach((token, index) => {
+			assert.equal(token.start, tokens[index].end);
+		});
 	});
 
 	it("colors keywords, strings, numbers and comments of C-like languages", () => {
@@ -56,7 +58,14 @@ describe("tokenize", () => {
 	});
 
 	it("colors JSON keys apart from string values", () => {
-		assert.deepEqual(colored('{"name": "omp", "ok": true, "n": -1}', "json"), ['key:"name"', 'string:"omp"', 'key:"ok"', "keyword:true", 'key:"n"', "number:-1"]);
+		assert.deepEqual(colored('{"name": "omp", "ok": true, "n": -1}', "json"), [
+			'key:"name"',
+			'string:"omp"',
+			'key:"ok"',
+			"keyword:true",
+			'key:"n"',
+			"number:-1",
+		]);
 	});
 
 	it("colors YAML and INI keys at line starts, and quoted scalars", () => {

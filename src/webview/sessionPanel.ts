@@ -3,7 +3,13 @@ import { todoSummary } from "./chrome";
 import { collapsible, h, type OpenState } from "./dom";
 import { type IconName, icon } from "./icons";
 
-const TODO_ICON: Record<string, IconName> = { completed: "circleCheck", in_progress: "circleDot", pending: "circle", abandoned: "circleSlash", blocked: "warning" };
+const TODO_ICON: Record<string, IconName> = {
+	completed: "circleCheck",
+	in_progress: "circleDot",
+	pending: "circle",
+	abandoned: "circleSlash",
+	blocked: "warning",
+};
 
 /** A short hash of `text` (cyrb53); names a todo list's content in dismissal keys. */
 function contentHash(text: string): string {

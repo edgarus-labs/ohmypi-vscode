@@ -1,12 +1,4 @@
-import type {
-	ConnectionStatus,
-	InteractionRequest,
-	InteractionResponse,
-	PromptMode,
-	ProviderUsage,
-	SessionView,
-	TranscriptItem,
-} from "../omp/api";
+import type { ConnectionStatus, InteractionRequest, InteractionResponse, PromptMode, ProviderUsage, SessionView, TranscriptItem } from "../omp/api";
 
 export interface PendingInteraction {
 	request: InteractionRequest;
@@ -31,14 +23,7 @@ export interface RecentSession {
 }
 
 /** Commands the webview may ask the host to run; the host rejects any other `command` message. */
-export const WEBVIEW_COMMANDS = [
-	"omp.selectModel",
-	"omp.resumeSession",
-	"omp.renameSession",
-	"omp.toggleFastMode",
-	"omp.openSettings",
-	"omp.restart",
-] as const;
+export const WEBVIEW_COMMANDS = ["omp.selectModel", "omp.resumeSession", "omp.renameSession", "omp.toggleFastMode", "omp.openSettings", "omp.restart"] as const;
 
 export type WebviewCommand = (typeof WEBVIEW_COMMANDS)[number];
 

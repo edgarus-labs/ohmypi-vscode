@@ -415,10 +415,7 @@ export class SessionStore {
 				if (event.errorMessage) this.addNotice("warning", `Compaction failed: ${event.errorMessage}`);
 				return;
 			case "auto_retry_start":
-				this.addNotice(
-					"warning",
-					`Retrying (attempt ${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s: ${event.errorMessage}`,
-				);
+				this.addNotice("warning", `Retrying (attempt ${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s: ${event.errorMessage}`);
 				return;
 			case "auto_retry_end":
 				if (!event.success) this.addNotice("error", `Retry failed: ${event.finalError ?? "unknown error"}`);
@@ -433,7 +430,9 @@ export class SessionStore {
 
 	#reindex(): void {
 		this.#index.clear();
-		this.#items.forEach((item, i) => this.#index.set(item.id, i));
+		this.#items.forEach((item, i) => {
+			this.#index.set(item.id, i);
+		});
 	}
 
 	#takePending(id: string): boolean {
@@ -551,10 +550,7 @@ export class SessionStore {
 		const delta = "delta" in update && typeof update.delta === "string" ? update.delta : "";
 		const contentIndex = "contentIndex" in update && typeof update.contentIndex === "number" ? update.contentIndex : 0;
 		const existing = this.#get(id);
-		const item: AssistantItem =
-			existing?.kind === "assistant"
-				? { ...existing }
-				: { kind: "assistant", id, text: "", thinking: "", streaming: true };
+		const item: AssistantItem = existing?.kind === "assistant" ? { ...existing } : { kind: "assistant", id, text: "", thinking: "", streaming: true };
 		let cursor = this.#cursors.get(id);
 		if (!cursor) {
 			cursor = {};
@@ -565,8 +561,7 @@ export class SessionStore {
 			cursor.textIndex = contentIndex;
 			item.text += delta;
 		} else {
-			if (cursor.thinkingIndex !== undefined && cursor.thinkingIndex !== contentIndex && item.thinking)
-				item.thinking += "\n\n";
+			if (cursor.thinkingIndex !== undefined && cursor.thinkingIndex !== contentIndex && item.thinking) item.thinking += "\n\n";
 			cursor.thinkingIndex = contentIndex;
 			item.thinking += delta;
 		}
@@ -589,9 +584,7 @@ export class SessionStore {
 		const result = toolResultView(rawResult, isError);
 		const existing = this.#get(toolCallId);
 		const base: ToolItem =
-			existing?.kind === "tool"
-				? existing
-				: { kind: "tool", id: toolCallId, name, args: undefined, status: "running", startedAt: Date.now() };
+			existing?.kind === "tool" ? existing : { kind: "tool", id: toolCallId, name, args: undefined, status: "running", startedAt: Date.now() };
 		const item: ToolItem = { ...base, status: result.isError ? "error" : "done", result, endedAt: Date.now() };
 		delete item.partial;
 		this.#set(item);

@@ -140,7 +140,9 @@ function variants(models: ModelView[]): Map<string, string> {
 		const remainders = ids.map(id => id.slice(prefix, id.length - suffix));
 		const heads = new Set(remainders.map(remainder => remainder.split(SEPARATOR)[0].toLowerCase()));
 		const useFull = remainders.some(remainder => !remainder) || heads.size < remainders.length;
-		group.forEach((model, index) => result.set(modelKey(model), useFull ? ids[index] : remainders[index]));
+		group.forEach((model, index) => {
+			result.set(modelKey(model), useFull ? ids[index] : remainders[index]);
+		});
 	}
 	return result;
 }

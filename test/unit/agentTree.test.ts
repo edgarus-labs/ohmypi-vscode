@@ -82,6 +82,9 @@ describe("AgentTreeProvider tooltip", () => {
 		const tooltip = new AgentTreeProvider().getTreeItem(agent).tooltip as unknown as MarkdownString;
 		assert.ok(tooltip.value.includes(agent.name));
 		assert.ok(tooltip.value.includes(agent.id));
-		assert.ok(markdown.every(value => !value.includes("evil.example") && !value.includes("x.example")), `appended as Markdown: ${markdown.join(" | ")}`);
+		assert.ok(
+			markdown.every(value => !value.includes("evil.example") && !value.includes("x.example")),
+			`appended as Markdown: ${markdown.join(" | ")}`,
+		);
 	});
 });

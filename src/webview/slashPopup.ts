@@ -81,22 +81,23 @@ export class SlashPopup {
 	#show(menu: SlashMenu | undefined): void {
 		this.#menu = menu;
 		this.#active = 0;
-		this.#rows = menu?.items.map((item, index) => {
-			const row = h(
-				"div",
-				{ class: "slash-option", title: item.description, attrs: { role: "option", id: `${LISTBOX_ID}-${index}`, "aria-selected": "false" } },
-				h("strong", { class: "slash-name" }, menu.level === "command" ? `/${item.name}` : item.name),
-				item.alias === undefined ? undefined : h("span", { class: "slash-alias" }, `/${item.alias}`),
-				item.hint ? h("span", { class: "slash-hint" }, item.hint) : undefined,
-				item.description ? h("span", { class: "slash-description" }, item.description) : undefined,
-				item.badge ? h("span", { class: "slash-badge" }, item.badge) : undefined,
-			);
-			row.addEventListener("mousedown", event => {
-				event.preventDefault();
-				this.#accept(index);
-			});
-			return row;
-		}) ?? [];
+		this.#rows =
+			menu?.items.map((item, index) => {
+				const row = h(
+					"div",
+					{ class: "slash-option", title: item.description, attrs: { role: "option", id: `${LISTBOX_ID}-${index}`, "aria-selected": "false" } },
+					h("strong", { class: "slash-name" }, menu.level === "command" ? `/${item.name}` : item.name),
+					item.alias === undefined ? undefined : h("span", { class: "slash-alias" }, `/${item.alias}`),
+					item.hint ? h("span", { class: "slash-hint" }, item.hint) : undefined,
+					item.description ? h("span", { class: "slash-description" }, item.description) : undefined,
+					item.badge ? h("span", { class: "slash-badge" }, item.badge) : undefined,
+				);
+				row.addEventListener("mousedown", event => {
+					event.preventDefault();
+					this.#accept(index);
+				});
+				return row;
+			}) ?? [];
 		const empty = h(
 			"div",
 			{ class: "slash-option slash-empty", attrs: { role: "option", "aria-disabled": "true", "aria-selected": "false" } },

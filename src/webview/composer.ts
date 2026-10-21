@@ -76,7 +76,12 @@ export class Composer {
 		this.#deps = deps;
 		const addContextButton = h(
 			"button",
-			{ class: "icon-button", title: "Add files to the chat (open editors, workspace)", attrs: { "aria-label": "Add files" }, onClick: () => deps.post({ type: "pickContext" }) },
+			{
+				class: "icon-button",
+				title: "Add files to the chat (open editors, workspace)",
+				attrs: { "aria-label": "Add files" },
+				onClick: () => deps.post({ type: "pickContext" }),
+			},
 			icon("plus"),
 		);
 		this.#contextButton = h(

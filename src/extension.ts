@@ -173,9 +173,9 @@ class OmpHost implements vscode.Disposable {
 
 	private onSessionChanged(session: SessionView): void {
 		if (session.sessionFile && session.sessionFile !== this.context.workspaceState.get<string>(LAST_SESSION_KEY)) {
-			this.context.workspaceState.update(LAST_SESSION_KEY, session.sessionFile).then(undefined, error =>
-				this.logger.error("Failed to persist last session file", error),
-			);
+			this.context.workspaceState
+				.update(LAST_SESSION_KEY, session.sessionFile)
+				.then(undefined, error => this.logger.error("Failed to persist last session file", error));
 		}
 	}
 
@@ -200,7 +200,9 @@ class OmpHost implements vscode.Disposable {
 		}
 		await this.changes.whenIdle();
 		if (!(await this.changes.openToolDiff(item, file))) {
-			void vscode.window.showInformationMessage(file === undefined ? "No diff recorded for this tool call." : `No diff recorded for ${file} in this tool call.`);
+			void vscode.window.showInformationMessage(
+				file === undefined ? "No diff recorded for this tool call." : `No diff recorded for ${file} in this tool call.`,
+			);
 		}
 	}
 
@@ -209,7 +211,9 @@ class OmpHost implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach(disposable => {
+			disposable.dispose();
+		});
 	}
 }
 

@@ -16,7 +16,10 @@ export function indentedJson(value: unknown): string {
 /** `name: value` lines: strings bare with their further lines indented, everything else as one line of JSON. */
 export function flatLines(entries: Array<[string, unknown]>): string {
 	return entries
-		.map(([name, value]) => `${name}: ${typeof value === "string" ? value.replace(/\r\n/g, "\n").replace(/\n/g, "\n  ") : (JSON.stringify(value) ?? String(value))}`)
+		.map(
+			([name, value]) =>
+				`${name}: ${typeof value === "string" ? value.replace(/\r\n/g, "\n").replace(/\n/g, "\n  ") : (JSON.stringify(value) ?? String(value))}`,
+		)
 		.join("\n");
 }
 
@@ -204,9 +207,11 @@ function differing(removed: string, added: string): [ChangedSpan | undefined, Ch
 	let prefix = 0;
 	while (prefix < removed.length && prefix < added.length && removed[prefix] === added[prefix]) prefix++;
 	let suffix = 0;
-	while (suffix < removed.length - prefix && suffix < added.length - prefix && removed[removed.length - 1 - suffix] === added[added.length - 1 - suffix]) suffix++;
+	while (suffix < removed.length - prefix && suffix < added.length - prefix && removed[removed.length - 1 - suffix] === added[added.length - 1 - suffix])
+		suffix++;
 	while (prefix > 0 && inWord(removed, prefix - 1) && (inWord(removed, prefix) || inWord(added, prefix))) prefix--;
-	while (suffix > 0 && inWord(removed, removed.length - suffix) && (inWord(removed, removed.length - suffix - 1) || inWord(added, added.length - suffix - 1))) suffix--;
+	while (suffix > 0 && inWord(removed, removed.length - suffix) && (inWord(removed, removed.length - suffix - 1) || inWord(added, added.length - suffix - 1)))
+		suffix--;
 	if (prefix + suffix === 0) return [undefined, undefined];
 	const span = (length: number) => (length - prefix - suffix > 0 ? { start: prefix, length: length - prefix - suffix } : undefined);
 	return [span(removed.length), span(added.length)];
@@ -251,7 +256,7 @@ const MARKED_COLUMNS = 1000;
  */
 export function findMarks(text: string, pattern: RegExp): Array<{ start: number; end: number }> {
 	const marks: Array<{ start: number; end: number }> = [];
-	for (let start = 0; marks.length < MAX_MARKS; ) {
+	for (let start = 0; marks.length < MAX_MARKS;) {
 		const newline = text.indexOf("\n", start);
 		const end = newline < 0 ? text.length : newline;
 		const cut = end - start > MARKED_COLUMNS;

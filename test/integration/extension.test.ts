@@ -115,7 +115,9 @@ describe("oh-my-pi extension (fake OMP)", () => {
 			{ id: "b", kind: "file", path: other.fsPath, label: "settings.json" },
 		]);
 		assert.equal(outcome.status, "completed");
-		assert.ok(sentCommands(mark).some(c => c.type === "prompt" && c.message === `compare these\n\nAttached: @sample.txt @${path.join(".vscode", "settings.json")}`));
+		assert.ok(
+			sentCommands(mark).some(c => c.type === "prompt" && c.message === `compare these\n\nAttached: @sample.txt @${path.join(".vscode", "settings.json")}`),
+		);
 	});
 
 	it("toggles fast mode through OMP", async () => {
@@ -218,9 +220,7 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		assert.ok((rendered.collapsedTools ?? 0) >= 2, "tool rows render collapsed by default");
 		await until("tracked change", () => api.changes.changes?.some(c => c.path === file));
 		await vscode.commands.executeCommand("omp.changes.openDiff", vscode.Uri.file(file));
-		await until("diff editor", () =>
-			vscode.window.tabGroups.all.some(g => g.tabs.some(t => t.input instanceof vscode.TabInputTextDiff)),
-		);
+		await until("diff editor", () => vscode.window.tabGroups.all.some(g => g.tabs.some(t => t.input instanceof vscode.TabInputTextDiff)));
 	});
 
 	it("tracks an edit even when OMP changed the file before the host saw the tool start", async () => {
@@ -230,7 +230,9 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("tracked racy change", () => api.changes.changes?.some(c => c.path === file), 3000);
 		await vscode.commands.executeCommand("omp.changes.openDiff", vscode.Uri.file(file));
 		const diff = await until("racy diff", () =>
-			vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputTextDiff && t.input.modified.fsPath === vscode.Uri.file(file).fsPath),
+			vscode.window.tabGroups.all
+				.flatMap(g => g.tabs)
+				.find(t => t.input instanceof vscode.TabInputTextDiff && t.input.modified.fsPath === vscode.Uri.file(file).fsPath),
 		);
 		const original = await vscode.workspace.openTextDocument((diff.input as vscode.TabInputTextDiff).original);
 		assert.equal(original.getText(), "original\n", "the diff baseline is the content before OMP's edit");

@@ -12,7 +12,10 @@ function apply(text: string, edit: LineEdit): string {
 /** Plans the edit against `text` (lines separated by `\n`) and applies it. */
 function replace(text: string, startLine: number, endLine: number, replacement: string, lineBreak = "\n"): string {
 	const lines = splitLines(text);
-	return apply(text, planLineEdit(lines.length, line => lines[line].length, startLine, endLine, replacement, lineBreak));
+	return apply(
+		text,
+		planLineEdit(lines.length, line => lines[line].length, startLine, endLine, replacement, lineBreak),
+	);
 }
 
 describe("host tool line edits", () => {

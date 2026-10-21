@@ -72,7 +72,10 @@ describe("OmpService host tools", () => {
 		assert.equal(omps.length, 2);
 		for (const omp of omps) {
 			const types = omp.written.map(frame => frame.type);
-			assert.deepEqual(omp.sent("set_host_tools").map(frame => frame.tools), [[DEFINITION]]);
+			assert.deepEqual(
+				omp.sent("set_host_tools").map(frame => frame.tools),
+				[[DEFINITION]],
+			);
 			assert.ok(types.indexOf("set_subagent_subscription") < types.indexOf("set_host_tools"));
 			assert.ok(types.indexOf("set_host_tools") < types.indexOf("set_ask_dialog"));
 		}
@@ -112,7 +115,10 @@ describe("OmpService host tools", () => {
 			result: { content: [{ type: "text", text: 'echo {"text":"hi"}' }], isError: false },
 		});
 		assert.deepEqual((await resultFor(omp, "h2")).result, { content: [{ type: "text", text: "echo {}" }], isError: false });
-		assert.deepEqual(calls.map(call => call.name), ["vscode_echo", "vscode_echo"]);
+		assert.deepEqual(
+			calls.map(call => call.name),
+			["vscode_echo", "vscode_echo"],
+		);
 	});
 
 	it("answers a call whose tool throws as a tool error carrying the message", async () => {
@@ -153,7 +159,10 @@ describe("OmpService host tools", () => {
 		await waitFor(() => calls.length === 2, 1000, "calls");
 		omp.close(3);
 		await waitFor(() => service.connection.state === "failed", 1000, "failed");
-		assert.deepEqual(calls.map(call => call.signal.aborted), [true, true]);
+		assert.deepEqual(
+			calls.map(call => call.signal.aborted),
+			[true, true],
+		);
 		await tick(10);
 		assert.deepEqual(omp.sent("host_tool_result"), []);
 	});

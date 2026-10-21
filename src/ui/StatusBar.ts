@@ -16,7 +16,9 @@ export class OmpStatusBar implements vscode.Disposable {
 	}
 
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.service = service;
 		this.unavailable = undefined;
 		this.subscriptions = service ? [service.onDidChangeSession(() => this.render()), service.onDidChangeConnection(() => this.render())] : [];
@@ -50,7 +52,9 @@ export class OmpStatusBar implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.item.dispose();
 	}
 }

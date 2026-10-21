@@ -99,6 +99,7 @@ describe("OmpProcess (fake-omp child process)", function () {
 
 	it("keeps only the last 20 stderr lines, including an unterminated one", async () => {
 		const { closes } = spawnScript(
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the script, not this file, interpolates the line number
 			'for (let i = 1; i <= 50; i++) process.stderr.write(`line ${i}\\n`); process.stderr.write("last words"); process.exitCode = 1;',
 		);
 		await waitFor(() => closes.length > 0, 5000, "exit");
@@ -128,7 +129,10 @@ describe("OmpProcess (fake-omp child process)", function () {
 		await waitFor(() => closes.length > 0, 5000, "exit");
 		const pieces = logger.records.filter(r => r.level === "debug" && r.message.startsWith("omp: ")).map(r => r.message.length - "omp: ".length);
 		assert.ok(pieces.length >= 3 && pieces.every(length => length <= 64 * 1024), JSON.stringify(pieces));
-		assert.equal(pieces.reduce((sum, length) => sum + length, 0), 200 * 1024 + 10);
+		assert.equal(
+			pieces.reduce((sum, length) => sum + length, 0),
+			200 * 1024 + 10,
+		);
 		assert.ok(closes[0].stderr?.endsWith("a".repeat(100) + "b".repeat(10)));
 	});
 

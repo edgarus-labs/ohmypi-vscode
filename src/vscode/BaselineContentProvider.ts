@@ -48,7 +48,8 @@ export class BaselineContentProvider implements vscode.TextDocumentContentProvid
 		if (uri.query === EMPTY_QUERY) return "";
 		const filePath = uri.with({ scheme: "file", query: "" }).fsPath;
 		const content = uri.query ? this.pinned.get(uri.query) : this.baseline(filePath);
-		if (content === undefined) throw new Error(`The OMP baseline of ${filePath} is no longer available; open the diff again from the chat or the Changes view.`);
+		if (content === undefined)
+			throw new Error(`The OMP baseline of ${filePath} is no longer available; open the diff again from the chat or the Changes view.`);
 		return content ?? "";
 	}
 }

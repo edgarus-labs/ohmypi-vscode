@@ -387,12 +387,7 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 				const session = vscode.debug.activeDebugSession;
 				if (!session) throw new Error("No debug session is running. Use vscode_debug with action start first.");
 				if (this.#stoppedTarget()) return this.#debuggerState();
-				const outcome = await this.#debug.waitAfter(
-					() => vscode.commands.executeCommand("workbench.action.debug.pause"),
-					PAUSE_WAIT_MS,
-					signal,
-					session.id,
-				);
+				const outcome = await this.#debug.waitAfter(() => vscode.commands.executeCommand("workbench.action.debug.pause"), PAUSE_WAIT_MS, signal, session.id);
 				return this.#describeOutcome(outcome, PAUSE_WAIT_MS);
 			}
 			default:
@@ -599,9 +594,7 @@ export class VsCodeHostTools implements HostTools, vscode.Disposable {
 			.filter(command => command.key.includes(needle))
 			.sort(
 				(a, b) =>
-					Number(!a.key.startsWith(needle)) - Number(!b.key.startsWith(needle)) ||
-					a.id.length - b.id.length ||
-					(a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+					Number(!a.key.startsWith(needle)) - Number(!b.key.startsWith(needle)) || a.id.length - b.id.length || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
 			)
 			.slice(0, max)
 			.map(command => command.id);

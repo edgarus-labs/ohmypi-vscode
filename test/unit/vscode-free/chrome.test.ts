@@ -21,17 +21,50 @@ describe("conversation chrome helpers", () => {
 		assert.equal(todoSummary([]), undefined);
 		assert.equal(todoSummary([{ name: "p", tasks: [] }]), undefined);
 		const phases = [
-			{ name: "Plan", tasks: [{ content: "Read code", status: "completed" }, { content: "Sketch", status: "completed" }] },
-			{ name: "Build", tasks: [{ content: "Write   the\nparser", status: "in_progress" }, { content: "Test", status: "pending" }, { content: "Ship", status: "pending" }] },
+			{
+				name: "Plan",
+				tasks: [
+					{ content: "Read code", status: "completed" },
+					{ content: "Sketch", status: "completed" },
+				],
+			},
+			{
+				name: "Build",
+				tasks: [
+					{ content: "Write   the\nparser", status: "in_progress" },
+					{ content: "Test", status: "pending" },
+					{ content: "Ship", status: "pending" },
+				],
+			},
 		];
 		assert.equal(todoSummary(phases), "todos 2/5 · current: Write the parser");
 		assert.equal(todoSummary([{ name: "p", tasks: [{ content: "a", status: "pending" }] }]), "todos 0/1");
 	});
 
 	it("leaves abandoned tasks out of the todo count, so a finished list reads N/N", () => {
-		const phases = [{ name: "p", tasks: [{ content: "a", status: "completed" }, { content: "b", status: "abandoned" }, { content: "c", status: "blocked" }] }];
+		const phases = [
+			{
+				name: "p",
+				tasks: [
+					{ content: "a", status: "completed" },
+					{ content: "b", status: "abandoned" },
+					{ content: "c", status: "blocked" },
+				],
+			},
+		];
 		assert.equal(todoSummary(phases), "todos 1/2");
-		assert.equal(todoSummary([{ name: "p", tasks: [{ content: "a", status: "completed" }, { content: "b", status: "abandoned" }] }]), "todos 1/1");
+		assert.equal(
+			todoSummary([
+				{
+					name: "p",
+					tasks: [
+						{ content: "a", status: "completed" },
+						{ content: "b", status: "abandoned" },
+					],
+				},
+			]),
+			"todos 1/1",
+		);
 	});
 
 	it("formats context usage and cost", () => {

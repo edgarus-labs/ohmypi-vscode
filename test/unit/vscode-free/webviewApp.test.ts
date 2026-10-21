@@ -127,7 +127,9 @@ describe("webview app", () => {
 		const image = new File([new Uint8Array(4)], "shot.png", { type: "image/png" });
 		const long = "line\n".repeat(20);
 		const paste = (files: File[]) =>
-			root.querySelector("textarea.input")?.dispatchEvent(event("paste", { clipboardData: { files, getData: (format: string) => (format === "text/plain" ? long : "") } }));
+			root
+				.querySelector("textarea.input")
+				?.dispatchEvent(event("paste", { clipboardData: { files, getData: (format: string) => (format === "text/plain" ? long : "") } }));
 		paste([image]);
 		await settle();
 		root.remove();

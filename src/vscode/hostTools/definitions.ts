@@ -122,7 +122,10 @@ export const TOOL_DEFINITIONS = [
 	tool(
 		"vscode_execute_command",
 		"Run any VS Code command by id, as if chosen from the Command Palette, for IDE features the other vscode_ tools do not cover (format document, organize imports, refactorings, ...). Find the id with vscode_find_commands. Most editor commands act on the active editor. Returns the command's result when it is JSON.",
-		{ command: str("Command id, for example editor.action.formatDocument."), arguments: str('Arguments passed to the command, as a JSON array, for example [true, "text"].') },
+		{
+			command: str("Command id, for example editor.action.formatDocument."),
+			arguments: str('Arguments passed to the command, as a JSON array, for example [true, "text"].'),
+		},
 		["command"],
 	),
 ] as const satisfies readonly HostToolDefinition[];

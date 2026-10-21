@@ -66,12 +66,12 @@ export class InteractionController implements vscode.Disposable {
 	) {}
 
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		for (const id of [...this.entries.keys()]) this.close(id);
 		this.service = service;
-		this.subscriptions = service
-			? [service.onInteractionRequest(request => this.add(request)), service.onInteractionCancelled(id => this.cancelled(id))]
-			: [];
+		this.subscriptions = service ? [service.onInteractionRequest(request => this.add(request)), service.onInteractionCancelled(id => this.cancelled(id))] : [];
 	}
 
 	list(): PendingInteraction[] {
@@ -178,7 +178,9 @@ export class InteractionController implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		for (const entry of this.entries.values()) entry.native?.cancel();
 		this.entries.clear();
 	}
@@ -196,7 +198,9 @@ export class PresentationHandler implements vscode.Disposable {
 
 	/** Status items belong to one OMP process: they go when the service changes or its process stops. */
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.clearStatusItems();
 		this.subscriptions = service
 			? [
@@ -262,7 +266,9 @@ export class PresentationHandler implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.clearStatusItems();
 	}
 }

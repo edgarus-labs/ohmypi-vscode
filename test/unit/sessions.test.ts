@@ -15,7 +15,7 @@ describe("listSessions", () => {
 
 	function write(name: string, lines: unknown[], mtime: number): string {
 		const file = path.join(dir, name);
-		fs.writeFileSync(file, lines.map(l => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + "\n");
+		fs.writeFileSync(file, `${lines.map(l => (typeof l === "string" ? l : JSON.stringify(l))).join("\n")}\n`);
 		fs.utimesSync(file, mtime, mtime);
 		return file;
 	}
@@ -54,17 +54,28 @@ describe("listSessions", () => {
 	});
 
 	it("skips garbage files, non-jsonl files and malformed lines", async () => {
-		write("garbage.jsonl", ["not json at all", "{\"type\":"], 3000);
+		write("garbage.jsonl", ["not json at all", '{"type":'], 3000);
 		write("notes.txt", [{ type: "session", id: "nope" }], 3000);
 		const ok = write("ok.jsonl", ["{broken", { type: "session", id: "s-ok" }], 1000);
 		fs.mkdirSync(path.join(dir, "dir.jsonl"));
 		const sessions = await listSessions(dir, memoryLogger());
-		assert.deepEqual(sessions.map(s => s.path), [ok]);
+		assert.deepEqual(
+			sessions.map(s => s.path),
+			[ok],
+		);
 	});
 
 	it("reads only the first 64 KiB of each file", async () => {
 		const big = "x".repeat(70 * 1024);
-		write("big.jsonl", [{ type: "session", id: "s-big" }, { type: "custom", pad: big }, { type: "message", message: { role: "user", content: "late" } }], 1000);
+		write(
+			"big.jsonl",
+			[
+				{ type: "session", id: "s-big" },
+				{ type: "custom", pad: big },
+				{ type: "message", message: { role: "user", content: "late" } },
+			],
+			1000,
+		);
 		const [session] = await listSessions(dir, memoryLogger());
 		assert.equal(session.id, "s-big");
 		assert.equal(session.firstMessage, undefined);
@@ -83,7 +94,14 @@ describe("listSessions", () => {
 
 	it("shortens a long first message at 200 characters without splitting one", async () => {
 		const text = `${"a".repeat(199)}😀😀 tail`;
-		write("e.jsonl", [{ type: "session", id: "s-e" }, { type: "message", message: { role: "user", content: text } }], 1000);
+		write(
+			"e.jsonl",
+			[
+				{ type: "session", id: "s-e" },
+				{ type: "message", message: { role: "user", content: text } },
+			],
+			1000,
+		);
 		const [session] = await listSessions(dir, memoryLogger());
 		assert.equal(session.firstMessage, `${"a".repeat(199)}😀…`);
 	});
@@ -118,7 +136,10 @@ describe("listSessions", () => {
 			return { path: file, modified: 1, size: 1 };
 		};
 		const sessions = await listSessions(dir, logger, read);
-		assert.deepEqual(sessions.map(s => s.path), [ok]);
+		assert.deepEqual(
+			sessions.map(s => s.path),
+			[ok],
+		);
 		assert.match(logger.text("warn"), /locked\.jsonl.*EBUSY/);
 	});
 

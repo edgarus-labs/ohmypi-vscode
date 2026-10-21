@@ -167,7 +167,8 @@ describe("tool rows", () => {
 	});
 
 	describe("diffs", () => {
-		const diffLines = (count: number) => ["@@ -1 +1 @@", "-const total = 1;", "+const sum = 1;", ...Array.from({ length: count - 3 }, (_, index) => ` ctx ${index}`)].join("\n");
+		const diffLines = (count: number) =>
+			["@@ -1 +1 @@", "-const total = 1;", "+const sum = 1;", ...Array.from({ length: count - 3 }, (_, index) => ` ctx ${index}`)].join("\n");
 
 		it("shows 20 tinted lines with the changed words marked, then show more and collapse", () => {
 			const el = mount(tool({ name: "edit", args: { path: "a.ts" }, result: { text: "ok", isError: false, details: { diff: diffLines(30) } } }), ctx);
@@ -202,7 +203,12 @@ describe("tool rows", () => {
 		});
 
 		it("heads each file of a multi-file diff and keeps a removed `--` line removed", () => {
-			const details = { perFileResults: [{ path: "a.sql", diff: "--- old comment\n+-- new comment" }, { path: "b.sql", diff: "-x\n+y" }] };
+			const details = {
+				perFileResults: [
+					{ path: "a.sql", diff: "--- old comment\n+-- new comment" },
+					{ path: "b.sql", diff: "-x\n+y" },
+				],
+			};
 			const el = mount(tool({ name: "edit", args: {}, result: { text: "ok", isError: false, details } }), ctx);
 			assert.deepEqual(
 				[...el.querySelectorAll(".diff-line")].map(line => `${line.className.replace("diff-line d-", "")} ${line.textContent}`),
@@ -223,7 +229,10 @@ describe("tool rows", () => {
 	});
 
 	it("shows a call still running in the background with a clock", () => {
-		const el = mount(tool({ name: "bash", args: { command: "serve" }, result: { text: "started", isError: false, details: { async: { state: "running" } } } }), ctx);
+		const el = mount(
+			tool({ name: "bash", args: { command: "serve" }, result: { text: "started", isError: false, details: { async: { state: "running" } } } }),
+			ctx,
+		);
 		assert.ok(el.classList.contains("status-background"));
 		const status = el.querySelector(".tool-status");
 		assert.equal(status?.getAttribute("title"), "started in the background, still running");

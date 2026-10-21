@@ -24,10 +24,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Lint and format
+        run: npm run check
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests

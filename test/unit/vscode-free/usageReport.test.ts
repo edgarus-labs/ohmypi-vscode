@@ -158,7 +158,9 @@ describe("usage buckets", () => {
 
 	it("renames limits whose equal used shares all name the same bucket", () => {
 		const text = GEMINI.replace("9.64% used (90.4% left)", "2.77% used (97.2% left)");
-		const json = GEMINI_JSON.replace("0.09636587", "0.02770454").replace("gemini-argon-wtu-weekly", "gemini-argon-weekly").replace("gemini-weekly", "gemini-argon-wtu-weekly");
+		const json = GEMINI_JSON.replace("0.09636587", "0.02770454")
+			.replace("gemini-argon-wtu-weekly", "gemini-argon-weekly")
+			.replace("gemini-weekly", "gemini-argon-wtu-weekly");
 		assert.deepEqual(names(text, json), ["Gemini Argon — Weekly", "Gemini Argon — Weekly", "Gemini — 5 Hour"]);
 	});
 
@@ -178,8 +180,30 @@ describe("usage buckets", () => {
 		].join("\n");
 		const json = JSON.stringify({
 			reports: [
-				{ provider: "cursor", limits: [{ id: "cursor:usd:individual-api", label: "Other Models", scope: { windowId: "monthly" }, window: { label: "Monthly" }, amount: { usedFraction: 0 } }] },
-				{ provider: "anthropic", limits: [{ id: "anthropic:7d:fable", label: "Claude 7 Day (Fable)", scope: { windowId: "7d", tier: "fable" }, window: { label: "7 Day" }, amount: { usedFraction: 0 } }] },
+				{
+					provider: "cursor",
+					limits: [
+						{
+							id: "cursor:usd:individual-api",
+							label: "Other Models",
+							scope: { windowId: "monthly" },
+							window: { label: "Monthly" },
+							amount: { usedFraction: 0 },
+						},
+					],
+				},
+				{
+					provider: "anthropic",
+					limits: [
+						{
+							id: "anthropic:7d:fable",
+							label: "Claude 7 Day (Fable)",
+							scope: { windowId: "7d", tier: "fable" },
+							window: { label: "7 Day" },
+							amount: { usedFraction: 0 },
+						},
+					],
+				},
 			],
 		});
 		const providers = parseUsageReport(text);
@@ -193,7 +217,12 @@ describe("usage buckets", () => {
 	it("adds a tier the label lacks and skips the generic quota window", () => {
 		const text = ["Usage (0s ago)", "Example", "- Pro (gold)", "  me: 50.00% used (50.0% left)"].join("\n");
 		const json = JSON.stringify({
-			reports: [{ provider: "example", limits: [{ id: "example:pro-extra", label: "Pro", scope: { tier: "gold" }, window: { label: "quota window" }, amount: { usedFraction: 0.5 } }] }],
+			reports: [
+				{
+					provider: "example",
+					limits: [{ id: "example:pro-extra", label: "Pro", scope: { tier: "gold" }, window: { label: "quota window" }, amount: { usedFraction: 0.5 } }],
+				},
+			],
 		});
 		assert.deepEqual(names(text, json), ["Pro Extra (gold)"]);
 	});

@@ -57,7 +57,9 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 	}
 
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.service = service;
 		this.sessionId = service?.session.sessionId;
 		this.subscriptions = service
@@ -164,7 +166,9 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 	}
 
 	dispose(): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.treeEmitter.dispose();
 		this.baselineEmitter.dispose();
 		this.summaryEmitter.dispose();

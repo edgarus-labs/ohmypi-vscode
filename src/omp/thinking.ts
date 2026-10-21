@@ -22,11 +22,7 @@ export function selectableLevels(levels: string[], reasoning: boolean): string[]
  * (`effective`), so `auto` is recovered from the newest journaled `thinking_level_change`
  * entry (`configured`, else its level); an unreadable journal falls back to `effective`.
  */
-export async function journaledThinkingSelector(
-	client: OmpRpcClient,
-	effective: string | undefined,
-	logger: Logger,
-): Promise<string | undefined> {
+export async function journaledThinkingSelector(client: OmpRpcClient, effective: string | undefined, logger: Logger): Promise<string | undefined> {
 	try {
 		const { entries } = await client.request("get_entries", undefined, { timeoutMs: JOURNAL_TIMEOUT_MS });
 		const latest = entries.findLast(entry => entry.type === "thinking_level_change");

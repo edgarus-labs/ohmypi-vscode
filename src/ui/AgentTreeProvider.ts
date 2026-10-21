@@ -74,10 +74,7 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vs
 
 	getTreeItem(agent: AgentView): vscode.TreeItem {
 		const hasChildren = this.children.has(agent.id);
-		const item = new vscode.TreeItem(
-			agentRowLabel(agent),
-			hasChildren ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
-		);
+		const item = new vscode.TreeItem(agentRowLabel(agent), hasChildren ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
 		// A new id once children appear, so VS Code applies Expanded instead of the remembered leaf state.
 		item.id = hasChildren ? `${agent.id}/tree` : agent.id;
 		item.description = agentRowDescription(agent);

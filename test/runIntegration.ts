@@ -20,7 +20,10 @@ function repositoryRoot(): string {
  * release `engines.vscode` admits, e.g. `1.106.0` for `^1.106.0`.
  */
 function vscodeVersion(root: string): string {
-	const requested = process.argv.find(arg => arg.startsWith("--vscode-version="))?.slice("--vscode-version=".length) ?? process.env.OMP_IT_VSCODE_VERSION ?? DEFAULT_VSCODE_VERSION;
+	const requested =
+		process.argv.find(arg => arg.startsWith("--vscode-version="))?.slice("--vscode-version=".length) ??
+		process.env.OMP_IT_VSCODE_VERSION ??
+		DEFAULT_VSCODE_VERSION;
 	if (requested !== "min") return requested;
 	const engine: unknown = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).engines?.vscode;
 	const minimum = typeof engine === "string" ? /^\^?(\d+\.\d+\.\d+)$/.exec(engine)?.[1] : undefined;
@@ -50,7 +53,15 @@ async function main(): Promise<void> {
 			vscodeExecutablePath,
 			extensionDevelopmentPath: process.env.OMP_IT_EXTENSION_PATH ?? root,
 			extensionTestsPath: path.join(__dirname, "integration", "index.js"),
-			launchArgs: [workspace, "--disable-extensions", "--disable-workspace-trust", "--user-data-dir", path.join(scratch, "user-data"), "--no-sandbox", "--disable-gpu"],
+			launchArgs: [
+				workspace,
+				"--disable-extensions",
+				"--disable-workspace-trust",
+				"--user-data-dir",
+				path.join(scratch, "user-data"),
+				"--no-sandbox",
+				"--disable-gpu",
+			],
 			extensionTestsEnv: {
 				FAKE_OMP_SESSION_DIR: sessions,
 				FAKE_OMP_LOG: path.join(scratch, "fake-omp.log"),

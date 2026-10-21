@@ -2,17 +2,7 @@ import * as crypto from "node:crypto";
 import * as path from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import * as vscode from "vscode";
-import type {
-	ConnectionStatus,
-	Disposable,
-	Logger,
-	OmpServiceApi,
-	PromptMode,
-	PromptOutcome,
-	SessionView,
-	SlashCommandView,
-	TranscriptItem,
-} from "../omp/api";
+import type { ConnectionStatus, Disposable, Logger, OmpServiceApi, PromptMode, PromptOutcome, SessionView, SlashCommandView, TranscriptItem } from "../omp/api";
 import { errorMessage } from "../shared/errors";
 import { isRecord } from "../shared/guards";
 import { emptySessionView } from "../shared/session";
@@ -132,7 +122,9 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 	}
 
 	setService(service: OmpServiceApi | undefined): void {
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.service = service;
 		this.unavailable = undefined;
 		this.subscriptions = service
@@ -211,7 +203,9 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 	}
 
 	resolveWebviewView(view: vscode.WebviewView): void {
-		this.viewSubscriptions.forEach(subscription => subscription.dispose());
+		this.viewSubscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.view = view;
 		this.webviewReady = false;
 		const webview = view.webview;
@@ -551,8 +545,12 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 
 	dispose(): void {
 		clearTimeout(this.flushTimer);
-		this.subscriptions.forEach(subscription => subscription.dispose());
-		this.viewSubscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
+		this.viewSubscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.renderEmitter.dispose();
 	}
 }

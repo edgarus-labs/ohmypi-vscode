@@ -62,7 +62,12 @@ describe("summarizeTool", () => {
 
 	it("summarizes task batches by name", () => {
 		assert.equal(
-			summarizeTool("task", { tasks: [{ name: "Alpha", task: "..." }, { agent: "scout", task: "..." }] }),
+			summarizeTool("task", {
+				tasks: [
+					{ name: "Alpha", task: "..." },
+					{ agent: "scout", task: "..." },
+				],
+			}),
 			"2 tasks: Alpha, scout",
 		);
 	});
@@ -112,7 +117,14 @@ describe("tool helpers", () => {
 describe("toolHeadline", () => {
 	it("shows a finished read as name, path, check and duration, naming the file to open", () => {
 		const head = toolHeadline(tool({ name: "read", args: { path: "src/AuthService.cs:50+20" }, endedAt: 1_012, result: { text: "...", isError: false } }));
-		assert.deepEqual(head, { name: "read", primary: "src/AuthService.cs:50+20", glyph: "✓", state: "done", detail: "12ms", file: { path: "src/AuthService.cs", line: 50 } });
+		assert.deepEqual(head, {
+			name: "read",
+			primary: "src/AuthService.cs:50+20",
+			glyph: "✓",
+			state: "done",
+			detail: "12ms",
+			file: { path: "src/AuthService.cs", line: 50 },
+		});
 	});
 
 	it("shows long tool durations in minutes and seconds, like the agents view", () => {
@@ -122,7 +134,12 @@ describe("toolHeadline", () => {
 
 	it("quotes search patterns and reports hits", () => {
 		const head = toolHeadline(
-			tool({ name: "grep", args: { pattern: "ValidateToken", path: "src" }, endedAt: 1_005, result: { text: "a", isError: false, details: { matchCount: 8 } } }),
+			tool({
+				name: "grep",
+				args: { pattern: "ValidateToken", path: "src" },
+				endedAt: 1_005,
+				result: { text: "a", isError: false, details: { matchCount: 8 } },
+			}),
 		);
 		assert.deepEqual(head, { name: "grep", primary: '"ValidateToken" in src', glyph: "✓", state: "done", detail: "8 hits · 5ms" });
 	});
@@ -146,7 +163,9 @@ describe("toolHeadline", () => {
 	});
 
 	it("shows no duration for a stored call that has no start time", () => {
-		const head = toolHeadline(tool({ name: "bash", args: { command: "make" }, startedAt: 0, endedAt: 1_760_000_000_000, result: { text: "", isError: false } }));
+		const head = toolHeadline(
+			tool({ name: "bash", args: { command: "make" }, startedAt: 0, endedAt: 1_760_000_000_000, result: { text: "", isError: false } }),
+		);
 		assert.equal(head.detail, "");
 	});
 
@@ -207,7 +226,13 @@ describe("toolHeadline", () => {
 
 	it("does not count the lines of a failed search's error as hits", () => {
 		const head = toolHeadline(
-			tool({ name: "grep", status: "error", args: { pattern: "x(" }, endedAt: 1_002, result: { text: "Error: invalid regex\nUnterminated group", isError: true } }),
+			tool({
+				name: "grep",
+				status: "error",
+				args: { pattern: "x(" },
+				endedAt: 1_002,
+				result: { text: "Error: invalid regex\nUnterminated group", isError: true },
+			}),
 		);
 		assert.equal(head.detail, "2ms");
 		assert.equal(head.error, "Error: invalid regex");
@@ -290,7 +315,12 @@ describe("toolState", () => {
 
 	it("shows a background job's headline as still going, without a duration", () => {
 		const head = toolHeadline(
-			tool({ name: "bash", args: { command: "npm run watch" }, endedAt: 1_005, result: { text: "started", isError: false, details: { exitCode: 0, async: { state: "running" } } } }),
+			tool({
+				name: "bash",
+				args: { command: "npm run watch" },
+				endedAt: 1_005,
+				result: { text: "started", isError: false, details: { exitCode: 0, async: { state: "running" } } },
+			}),
 		);
 		assert.deepEqual(head, { name: "bash", primary: "npm run watch", glyph: "…", state: "background", detail: "in background" });
 	});
@@ -421,7 +451,21 @@ describe("searchPattern", () => {
 		`\\w*${"[a]".repeat(40)}b`,
 	];
 	/** Patterns whose work per position stays bounded: one repeating quantifier, up to two optional ones, alternation at the top level only. */
-	const BOUNDED = ["^foo\\d", "foo\\s+bar", "https?://\\S+", "TODO|FIXME", "export (?:const) \\w+", "(?<=a)b+", "[(|)+*]+x", "\\(x\\)+", "colou?r", ".*x", "\\w+\\s?:", "a?a?a+x", "x{2}"];
+	const BOUNDED = [
+		"^foo\\d",
+		"foo\\s+bar",
+		"https?://\\S+",
+		"TODO|FIXME",
+		"export (?:const) \\w+",
+		"(?<=a)b+",
+		"[(|)+*]+x",
+		"\\(x\\)+",
+		"colou?r",
+		".*x",
+		"\\w+\\s?:",
+		"a?a?a+x",
+		"x{2}",
+	];
 
 	it("marks a pattern whose backtracking could outgrow the text as literal text", () => {
 		for (const pattern of RUNAWAY) assert.equal(grep(pattern)?.source, literal(pattern), pattern);

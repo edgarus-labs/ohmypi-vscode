@@ -26,7 +26,7 @@ export function formatEditorContext(data: EditorContextData): string {
 	if (data.workspaceFolders.length > 0) out.push(`workspace: ${data.workspaceFolders.join(", ")}`);
 	const active = data.activeFile;
 	if (active) out.push(`active file: ${active.path} (${active.languageId}), cursor ${active.line}:${active.column}`);
-	if (data.selection && data.selection.text) {
+	if (data.selection?.text) {
 		const { text, startLine, endLine } = data.selection;
 		const truncated = text.length > MAX_SELECTION_CHARS;
 		const body = truncated ? `${text.slice(0, MAX_SELECTION_CHARS)}\n[selection truncated]` : text;

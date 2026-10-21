@@ -60,7 +60,9 @@ describe("toModelView", () => {
 	it("keeps the class, family and revision OMP identifies the model by, dropping non-string parts", () => {
 		const identity = { class: "anthropic", family: "opus", revision: "4.1.0" };
 		assert.deepEqual(toModelView({ ...wire, identity }).identity, identity);
-		assert.deepEqual(toModelView({ ...wire, identity: { class: "openai", family: 5, revision: null } as unknown as ModelInfo["identity"] }).identity, { class: "openai" });
+		assert.deepEqual(toModelView({ ...wire, identity: { class: "openai", family: 5, revision: null } as unknown as ModelInfo["identity"] }).identity, {
+			class: "openai",
+		});
 		assert.equal(toModelView(wire).identity, undefined);
 	});
 });

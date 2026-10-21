@@ -12,6 +12,7 @@ const DRIVE = /^[A-Za-z]:[\\/]/;
 /** Rooted at `/`, `./`, `../`, `~/`, a drive or a UNC share: any last segment names a file. */
 const ANCHORED = /^(?:\/(?!\/)|\.\.?[\\/]|~[\\/]|[A-Za-z]:[\\/]|\\\\(?!\\))/;
 /** Whitespace, backticks, controls and glob characters never occur in a path worth linking. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are not valid in a path link
 const NOT_IN_PATH = /[\s`*?|\u0000-\u001f]/;
 const EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
 

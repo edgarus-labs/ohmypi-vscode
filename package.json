@@ -402,18 +402,26 @@
     "test": "npm run typecheck && npm run test:unit && npm run test:integration",
     "test:real": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --real",
     "vscode:prepublish": "node esbuild.mjs --production",
-    "package": "node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies -o dist-vsix/oh-my-pi.vsix"
+    "package": "node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies -o dist-vsix/oh-my-pi.vsix",
+    "lint": "biome lint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.19.43",
     "@types/vscode": "1.106.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
+    "husky": "^9.1.7",
     "linkedom": "^0.18.13",
     "mocha": "^12.0.3",
     "mocha-host": "npm:mocha@^11.8.0",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   },
   "overrides": {

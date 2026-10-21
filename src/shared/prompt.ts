@@ -25,7 +25,7 @@ const PASTED_TAG = "pasted-text";
 const PASTED_END = `</${PASTED_TAG}>`;
 const PASTED_BLOCK = /\n*<pasted-text name="([^"]*)">\n([\s\S]*?)\n<\/pasted-text>/g;
 const MENTION_SOURCE = String.raw`@(?:"(?:\\.|[^"\\])+"|[^\s"]\S*)`;
-const ATTACHED_LINE = new RegExp(String.raw`^Attached: (${MENTION_SOURCE}(?: ${MENTION_SOURCE})*)$`);
+const ATTACHED_LINE = new RegExp(`^Attached: (${MENTION_SOURCE}(?: ${MENTION_SOURCE})*)$`);
 const MENTION = /@(?:"((?:\\.|[^"\\])+)"|([^\s"]\S*))/g;
 
 /** Inserts a backslash before the `/` of every `</tag>`, `<\/tag>`, `<\\/tag>`… in any letter case, so the text holds no closing `tag`. */

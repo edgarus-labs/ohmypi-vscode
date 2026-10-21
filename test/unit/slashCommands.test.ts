@@ -10,7 +10,10 @@ describe("toSlashCommands", () => {
 					name: "effort",
 					description: "Set effort",
 					input: { hint: "[level]" },
-					subcommands: [{ name: "off", description: "No reasoning" }, { name: "auto", usage: "/effort auto" }],
+					subcommands: [
+						{ name: "off", description: "No reasoning" },
+						{ name: "auto", usage: "/effort auto" },
+					],
 					source: "builtin",
 				},
 				{ name: "skill:codebase-review", source: "skill" },
@@ -23,7 +26,10 @@ describe("toSlashCommands", () => {
 					aliases: [],
 					description: "Set effort",
 					hint: "[level]",
-					subcommands: [{ name: "off", description: "No reasoning" }, { name: "auto", usage: "/effort auto" }],
+					subcommands: [
+						{ name: "off", description: "No reasoning" },
+						{ name: "auto", usage: "/effort auto" },
+					],
 				},
 				{ name: "skill:codebase-review", source: "skill", aliases: [], subcommands: [] },
 			],
@@ -41,7 +47,13 @@ describe("toSlashCommands", () => {
 		assert.deepEqual(
 			toSlashCommands([
 				{ name: "a", aliases: "x", description: 5, input: "hint", subcommands: { name: "s" } },
-				{ name: "b", aliases: ["ok", 1, "", null], input: { hint: 9 }, subcommands: [null, { name: "" }, { name: "s", description: 1, usage: ["u"] }], source: 4 },
+				{
+					name: "b",
+					aliases: ["ok", 1, "", null],
+					input: { hint: 9 },
+					subcommands: [null, { name: "" }, { name: "s", description: 1, usage: ["u"] }],
+					source: 4,
+				},
 				{ name: "c", input: null, subcommands: null, source: "" },
 			]),
 			[

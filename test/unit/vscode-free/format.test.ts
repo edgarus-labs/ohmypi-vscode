@@ -64,7 +64,13 @@ describe("format helpers", () => {
 	it("renders a turn summary as one italic line", () => {
 		const md = transcriptToMarkdown("Agent main", [
 			{ kind: "assistant", id: "a", text: "done", thinking: "", streaming: false },
-			{ kind: "turn_summary", id: "s", status: "aborted", durationMs: 12_000, usage: { input: 1_200, output: 300, cacheRead: 0, cacheWrite: 0, costUsd: 0.0123 } },
+			{
+				kind: "turn_summary",
+				id: "s",
+				status: "aborted",
+				durationMs: 12_000,
+				usage: { input: 1_200, output: 300, cacheRead: 0, cacheWrite: 0, costUsd: 0.0123 },
+			},
 		]);
 		assert.ok(md.endsWith("done\n\n_Stopped after 12s · 1.2k in · 300 out · $0.0123_\n"), md);
 	});

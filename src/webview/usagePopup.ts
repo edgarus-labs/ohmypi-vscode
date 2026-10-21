@@ -95,7 +95,11 @@ export class UsagePopup {
 					{ class: "icon-button usage-popup-refresh", title: "Refresh", attrs: { "aria-label": "Refresh usage" }, onClick: () => this.#load() },
 					icon("refresh", 14),
 				),
-				h("button", { class: "icon-button usage-popup-close", title: "Close (Esc)", attrs: { "aria-label": "Close usage" }, onClick: () => this.close() }, icon("x", 14)),
+				h(
+					"button",
+					{ class: "icon-button usage-popup-close", title: "Close (Esc)", attrs: { "aria-label": "Close usage" }, onClick: () => this.close() },
+					icon("x", 14),
+				),
 			),
 			this.#body,
 		);

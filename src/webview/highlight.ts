@@ -196,7 +196,9 @@ const SYNTAXES: Record<string, Syntax> = {
 		rawQuotes: "'",
 		commands: true,
 		openers: words("if then else elif do while until time sudo exec nohup env xargs"),
-		keywords: words("alias case cd declare do done echo elif else esac exit export fi for function if in local readonly return select set source then time unset until while"),
+		keywords: words(
+			"alias case cd declare do done echo elif else esac exit export fi for function if in local readonly return select set source then time unset until while",
+		),
 	}),
 	powershell: syntax({
 		lineComments: ["#"],
@@ -205,7 +207,9 @@ const SYNTAXES: Record<string, Syntax> = {
 		rawQuotes: "'",
 		backtickEscapes: true,
 		commands: true,
-		keywords: words("begin break catch class continue do dynamicparam else elseif end enum filter finally for foreach from function if in param process return switch throw trap try until using while"),
+		keywords: words(
+			"begin break catch class continue do dynamicparam else elseif end enum filter finally for foreach from function if in param process return switch throw trap try until using while",
+		),
 		ignoreCase: true,
 	}),
 	sql: syntax({
@@ -423,11 +427,11 @@ class Lexer {
 		const tripleQuote = quote.repeat(3);
 		const triple = this.#x.tripleQuotes && this.#at(tripleQuote);
 		const raw = this.#x.rawQuotes.includes(quote) && !(this.#x.commands && this.#prev() === "$");
-		const escape = raw ? "" : this.#x.backtickEscapes ? "`" : "\\";
+		const escapeChar = raw ? "" : this.#x.backtickEscapes ? "`" : "\\";
 		let j = this.#i + (triple ? 3 : 1);
 		while (j < s.length) {
 			const c = s[j];
-			if (escape && c === escape && j + 1 < s.length) {
+			if (escapeChar && c === escapeChar && j + 1 < s.length) {
 				j += 2;
 				continue;
 			}

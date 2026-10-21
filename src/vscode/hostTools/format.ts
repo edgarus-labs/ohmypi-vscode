@@ -160,5 +160,5 @@ export interface VariableInfo {
 
 export function locals(variables: readonly VariableInfo[]): string {
 	if (variables.length === 0) return "No local variables.";
-	return variables.map(variable => variable.name + (variable.type ? ` (${variable.type})` : "") + ` = ${variable.value}`).join("\n");
+	return variables.map(variable => `${variable.name + (variable.type ? ` (${variable.type})` : "")} = ${variable.value}`).join("\n");
 }

@@ -46,12 +46,7 @@ describe("debug session tracking", () => {
 
 	it("resolves with the stop the action causes, even one reported before the action returns", async () => {
 		sessions.onMessage("s1", stopped(1));
-		const outcome = await sessions.waitAfter(
-			async () => sessions.onMessage("s1", stopped(1, "step")),
-			1000,
-			signal(),
-			"s1",
-		);
+		const outcome = await sessions.waitAfter(async () => sessions.onMessage("s1", stopped(1, "step")), 1000, signal(), "s1");
 		assert.deepEqual(outcome, { kind: "stopped", session: main, stop: { threadId: 1, reason: "step" } });
 	});
 
@@ -110,10 +105,12 @@ describe("debug session tracking", () => {
 
 	it("resolves the end wait once every tracked session and every listed one ended, ignoring stops", async () => {
 		let settled = false;
-		const ended = sessions.endAfter(async () => sessions.onEnded("s1"), 1000, signal(), ["s3"]).then(value => {
-			settled = true;
-			return value;
-		});
+		const ended = sessions
+			.endAfter(async () => sessions.onEnded("s1"), 1000, signal(), ["s3"])
+			.then(value => {
+				settled = true;
+				return value;
+			});
 		await tick();
 		sessions.onMessage("s2", stopped(4));
 		sessions.onEnded("s2");

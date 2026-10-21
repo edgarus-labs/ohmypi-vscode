@@ -31,7 +31,10 @@ describe("slash command matching", () => {
 
 	it("matches case-insensitively and reports the alias that matched", () => {
 		const menu = slashMenu("/SUMM", 5, COMMANDS);
-		assert.deepEqual(menu?.items.map(item => [item.name, item.alias]), [["compact", "summarize"]]);
+		assert.deepEqual(
+			menu?.items.map(item => [item.name, item.alias]),
+			[["compact", "summarize"]],
+		);
 		assert.equal(slashMenu("/mod", 4, COMMANDS)?.items[0]?.alias, undefined);
 	});
 

@@ -16,7 +16,10 @@ describe("agent and change summaries", () => {
 	});
 
 	it("describes an agent row as type · status · truncated activity", () => {
-		assert.equal(agentRowDescription(agent({ id: "ReviewAuth", name: "scout", status: "running", activity: "read src/a.ts" })), "scout · running · read src/a.ts");
+		assert.equal(
+			agentRowDescription(agent({ id: "ReviewAuth", name: "scout", status: "running", activity: "read src/a.ts" })),
+			"scout · running · read src/a.ts",
+		);
 		assert.equal(agentRowDescription(agent({ id: "main", name: "main", status: "completed" })), "completed");
 		const long = agentRowDescription(agent({ status: "running", activity: "x".repeat(100) }));
 		assert.ok(long.length <= 50, long);

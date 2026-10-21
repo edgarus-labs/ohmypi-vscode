@@ -247,7 +247,8 @@ export function toolHeadline(item: ToolItem, cwd?: string): ToolHeadline {
 		}
 		const exit = kind === "shell" ? exitCodeOf(item.result) : undefined;
 		if (exit !== undefined) parts.push(`exit ${exit}`);
-		if (item.name === "write" && isRecord(item.args) && typeof item.args.content === "string") parts.push(plural(item.args.content.replace(/\r?\n$/, "").split("\n").length, "line"));
+		if (item.name === "write" && isRecord(item.args) && typeof item.args.content === "string")
+			parts.push(plural(item.args.content.replace(/\r?\n$/, "").split("\n").length, "line"));
 		if (state === "background") parts.splice(0, parts.length, "in background");
 		else if (item.endedAt !== undefined && item.startedAt > 0 && item.endedAt >= item.startedAt) parts.push(formatDuration(item.endedAt - item.startedAt));
 		const primary = relativeTo(primaryArg(item, kind), cwd);
@@ -566,7 +567,12 @@ function actionsLine(...children: Child[]): HTMLElement | null {
 function fileLink(ctx: RenderContext, path: string, line?: number): HTMLElement {
 	return h(
 		"button",
-		{ class: "link path", title: `Open ${line ? `${path}:${line}` : path}`, attrs: { type: "button" }, onClick: () => ctx.post({ type: "openFile", path, line }) },
+		{
+			class: "link path",
+			title: `Open ${line ? `${path}:${line}` : path}`,
+			attrs: { type: "button" },
+			onClick: () => ctx.post({ type: "openFile", path, line }),
+		},
 		fileLinkLabel(path, line, ctx.cwd),
 	);
 }
@@ -581,7 +587,16 @@ const fileBody: Body = (item, row) => {
 	const links = fileActions(item, ctx.cwd).map(action =>
 		action.kind === "open"
 			? fileLink(ctx, action.path, action.line)
-			: h("button", { class: "link", title: "Open native diff", attrs: { type: "button" }, onClick: () => ctx.post({ type: "openDiff", toolCallId: item.id, path: action.path }) }, action.label),
+			: h(
+					"button",
+					{
+						class: "link",
+						title: "Open native diff",
+						attrs: { type: "button" },
+						onClick: () => ctx.post({ type: "openDiff", toolCallId: item.id, path: action.path }),
+					},
+					action.label,
+				),
 	);
 	return [
 		actionsLine(...links),
@@ -604,7 +619,13 @@ const taskBody: Body = (item, row) => {
 	const showAgents = () => row.ctx.post({ type: "showAgents" });
 	return [
 		actionsLine(h("button", { class: "link", attrs: { type: "button" }, onClick: showAgents }, "Agents")),
-		names.length > 0 ? h("ul", { class: "task-list" }, ...names.map(name => h("li", undefined, h("button", { class: "link", attrs: { type: "button" }, onClick: showAgents }, name)))) : null,
+		names.length > 0
+			? h(
+					"ul",
+					{ class: "task-list" },
+					...names.map(name => h("li", undefined, h("button", { class: "link", attrs: { type: "button" }, onClick: showAgents }, name))),
+				)
+			: null,
 		outputSection(item, row),
 	];
 };
@@ -643,13 +664,21 @@ function header(item: ToolItem, head: ToolHeadline): HTMLElement {
 	return h(
 		"div",
 		{ class: "tool-head", attrs: { "data-part": "head" } },
-		h("span", { class: "tool-status", title: TOOL_STATE[head.state].title, attrs: { role: "img", "aria-label": TOOL_STATE[head.state].label } }, icon(TOOL_STATE[head.state].icon, 14)),
+		h(
+			"span",
+			{ class: "tool-status", title: TOOL_STATE[head.state].title, attrs: { role: "img", "aria-label": TOOL_STATE[head.state].label } },
+			icon(TOOL_STATE[head.state].icon, 14),
+		),
 		h("span", { class: "tool-name", title: item.name }, head.name),
 		h(
 			"span",
 			{ class: `tool-primary${described ? " described" : ""}`, title: shell ? shellCommand(item) : head.primary },
 			head.file
-				? h("a", { class: "file-link", attrs: { href: "#", "data-path": head.file.path, ...(head.file.line ? { "data-line": String(head.file.line) } : {}) } }, head.primary)
+				? h(
+						"a",
+						{ class: "file-link", attrs: { href: "#", "data-path": head.file.path, ...(head.file.line ? { "data-line": String(head.file.line) } : {}) } },
+						head.primary,
+					)
 				: head.primary,
 		),
 		head.detail ? h("span", { class: "tool-detail" }, head.detail) : null,
@@ -697,13 +726,18 @@ export function renderTool(item: ToolItem, ctx: RenderContext): HTMLElement {
 		try {
 			parts = BODIES[pickRenderer(item.name)](item, row);
 		} catch (error) {
-			parts = [h("div", { class: "tool-fallback meta" }, `Specialized view failed (${errorMessage(error)}); showing raw arguments and output.`), ...genericBody(item, row)];
+			parts = [
+				h("div", { class: "tool-fallback meta" }, `Specialized view failed (${errorMessage(error)}); showing raw arguments and output.`),
+				...genericBody(item, row),
+			];
 		}
 		if (parts.some(Boolean)) el.append(h("div", { class: "tool-body" }, ...parts));
 	}
 	const text = item.result?.text ?? "";
 	if (headerOnly && text) {
-		const lines = proseText(text).replace(/[\r\n]+$/, "").split("\n").length;
+		const lines = proseText(text)
+			.replace(/[\r\n]+$/, "")
+			.split("\n").length;
 		el.append(
 			h(
 				"div",

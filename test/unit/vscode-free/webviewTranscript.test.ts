@@ -170,7 +170,10 @@ describe("TranscriptView", () => {
 		withTail.notice("info", "note");
 		assert.ok(withTail.element.lastElementChild === tail);
 		withTail.reset([{ kind: "user", id: "u2", text: "again" }]);
-		assert.deepEqual(Array.from(withTail.element.children, child => child.getAttribute("data-id")), ["u2", "local-1", null]);
+		assert.deepEqual(
+			Array.from(withTail.element.children, child => child.getAttribute("data-id")),
+			["u2", "local-1", null],
+		);
 		assert.ok(withTail.element.lastElementChild === tail);
 	});
 

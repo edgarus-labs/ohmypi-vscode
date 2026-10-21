@@ -54,7 +54,14 @@ function renderAsk(request: Extract<InteractionRequest, { kind: "ask" }>, respon
 			other,
 		);
 	});
-	const submit = () => respond(request.id, { kind: "answers", answers: buildAskAnswers(request.questions, readers.map(read => read())) });
+	const submit = () =>
+		respond(request.id, {
+			kind: "answers",
+			answers: buildAskAnswers(
+				request.questions,
+				readers.map(read => read()),
+			),
+		});
 	return [...fields, actions(h("button", { class: "primary", onClick: submit }, "Submit"), cancelButton(request.id, respond))];
 }
 
@@ -105,7 +112,13 @@ function renderBody(request: InteractionRequest, respond: Respond): HTMLElement[
 		case "editor": {
 			const area = h("textarea", { class: "input", attrs: { rows: "6", "aria-label": request.title } });
 			area.value = request.prefill ?? "";
-			return [area, actions(h("button", { class: "primary", onClick: () => respond(request.id, { kind: "value", value: area.value }) }, "Submit"), cancelButton(request.id, respond))];
+			return [
+				area,
+				actions(
+					h("button", { class: "primary", onClick: () => respond(request.id, { kind: "value", value: area.value }) }, "Submit"),
+					cancelButton(request.id, respond),
+				),
+			];
 		}
 		case "ask":
 			return renderAsk(request, respond);
@@ -178,7 +191,13 @@ export class InteractionsView {
 			el = h(
 				"div",
 				{ class: `interaction kind-${request.kind}`, attrs: { "data-id": request.id, role: "region", "aria-labelledby": titleId } },
-				h("div", { class: "interaction-title" }, h("span", { attrs: { id: titleId } }, title), h("span", { class: "spacer" }), h("span", { class: "countdown meta" })),
+				h(
+					"div",
+					{ class: "interaction-title" },
+					h("span", { attrs: { id: titleId } }, title),
+					h("span", { class: "spacer" }),
+					h("span", { class: "countdown meta" }),
+				),
 				...renderBody(request, (id, response) => this.#respond(id, response)),
 			);
 		} catch (error) {
@@ -232,7 +251,8 @@ export class InteractionsView {
 	#respond(id: string, response: InteractionResponse): void {
 		const el = this.#nodes.get(id);
 		this.#deps.focusComposer();
-		for (const control of el?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea") ?? []) control.disabled = true;
+		for (const control of el?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea") ?? [])
+			control.disabled = true;
 		this.#deps.post({ type: "respond", id, response });
 	}
 

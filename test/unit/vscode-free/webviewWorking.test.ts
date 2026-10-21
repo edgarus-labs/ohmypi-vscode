@@ -71,7 +71,9 @@ describe("WorkingIndicator", () => {
 			assert.equal(el.querySelector(part)?.getAttribute("aria-hidden"), "true", part);
 		}
 		assert.deepEqual(
-			Array.from(el.children).filter(child => child.getAttribute("aria-hidden") !== "true").map(child => [child.className, child.textContent]),
+			Array.from(el.children)
+				.filter(child => child.getAttribute("aria-hidden") !== "true")
+				.map(child => [child.className, child.textContent]),
 			[["sr-only", "OMP is working"]],
 		);
 	});
@@ -201,7 +203,13 @@ describe("webview working row", () => {
 	it("shows a turn summary as a line under the turn", () => {
 		app.handle({
 			type: "item",
-			item: { kind: "turn_summary", id: "turn-1", status: "completed", durationMs: 72_000, usage: { input: 12_300, output: 2_100, cacheRead: 0, cacheWrite: 0, costUsd: 0.0123 } },
+			item: {
+				kind: "turn_summary",
+				id: "turn-1",
+				status: "completed",
+				durationMs: 72_000,
+				usage: { input: 12_300, output: 2_100, cacheRead: 0, cacheWrite: 0, costUsd: 0.0123 },
+			},
 		});
 		const line = root.querySelector('.item.turn-summary[data-kind="turn_summary"]');
 		assert.equal(line?.textContent, "Worked 1m 12s · 12.3k in · 2.1k out · $0.0123");

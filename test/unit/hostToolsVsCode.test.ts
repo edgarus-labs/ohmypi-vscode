@@ -120,7 +120,9 @@ describe("VS Code host tools", () => {
 					return command === "stackTrace" ? frames : {};
 				},
 			};
-			const [[, factory]] = stub.callsTo("debug.registerDebugAdapterTrackerFactory") as Array<[string, { createDebugAdapterTracker(s: FakeSession): FakeTracker }]>;
+			const [[, factory]] = stub.callsTo("debug.registerDebugAdapterTrackerFactory") as Array<
+				[string, { createDebugAdapterTracker(s: FakeSession): FakeTracker }]
+			>;
 			tracker = factory.createDebugAdapterTracker(session);
 			debug.activeDebugSession = session;
 			tracker.onDidSendMessage(stoppedEvent(7, "breakpoint"));
@@ -205,7 +207,13 @@ describe("VS Code host tools", () => {
 		});
 
 		it("starts one from the workspace file as a configuration for the current platform, without a folder", async () => {
-			const configuration = { ...launch("Debug all"), program: "app.js", windows: { program: "app.exe" }, osx: { program: "app.mac" }, linux: { program: "app.linux" } };
+			const configuration = {
+				...launch("Debug all"),
+				program: "app.js",
+				windows: { program: "app.exe" },
+				osx: { program: "app.mac" },
+				linux: { program: "app.linux" },
+			};
 			stub.config.set("launch.configurations", [configuration]);
 			defineLaunch({ workspace: [configuration] });
 			await invoke("vscode_debug", { action: "start", configuration: "Debug all", noDebug: true });
@@ -225,7 +233,8 @@ describe("VS Code host tools", () => {
 			stub.config.set("launch.compounds", [compound]);
 			defineLaunch({ workspace: [compound] }, "compounds");
 			await assert.rejects(invoke("vscode_debug", { action: "start", configuration: "Both" }), {
-				message: "'Both' is a compound launch configuration in the workspace file; VS Code lets extensions start compounds only from a folder's launch.json. Start it from the Run and Debug view.",
+				message:
+					"'Both' is a compound launch configuration in the workspace file; VS Code lets extensions start compounds only from a folder's launch.json. Start it from the Run and Debug view.",
 			});
 			assert.deepEqual(stub.callsTo("debug.startDebugging"), []);
 		});
@@ -253,7 +262,8 @@ describe("VS Code host tools", () => {
 			assert.equal(await result, "Task Workspace: build (b) finished with exit code 0.\nProblems: 0 error(s), 0 warning(s).");
 			assert.deepEqual(stub.callsTo("tasks.executeTask"), [[buildB]]);
 			await assert.rejects(run("Workspace: build"), {
-				message: "Several tasks are named 'Workspace: build': Workspace: build (a), Workspace: build (b), Workspace: build (user), Workspace: build (workspace); pass the label.",
+				message:
+					"Several tasks are named 'Workspace: build': Workspace: build (a), Workspace: build (b), Workspace: build (user), Workspace: build (workspace); pass the label.",
 			});
 		});
 

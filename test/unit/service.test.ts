@@ -2,14 +2,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type {
-	ConnectionState,
-	InteractionRequest,
-	PresentationRequest,
-	SessionPhase,
-	ToolExecutionEvent,
-	TranscriptItem,
-} from "../../src/omp/api";
+import type { ConnectionState, InteractionRequest, PresentationRequest, SessionPhase, ToolExecutionEvent, TranscriptItem } from "../../src/omp/api";
 import type { OmpProcessHandle } from "../../src/omp/lifecycle";
 import { OmpProcess, type OmpProcessOptions } from "../../src/omp/process";
 import { OmpService, type OmpServiceTuning } from "../../src/omp/service";
@@ -17,9 +10,12 @@ import { FAKE_OMP, isAlive, MemoryTransport, memoryLogger, tick, waitFor } from 
 import { MemoryOmp, NO_REPLY } from "./memoryOmp";
 
 const codeOf = (error: unknown) => (error as { code?: unknown } | undefined)?.code;
-const settle = (promise: Promise<unknown>) => promise.then(() => undefined, (error: unknown) => error);
-const notices = (items: readonly TranscriptItem[]) =>
-	items.flatMap(item => (item.kind === "notice" ? [`${item.level}: ${item.text}`] : []));
+const settle = (promise: Promise<unknown>) =>
+	promise.then(
+		() => undefined,
+		(error: unknown) => error,
+	);
+const notices = (items: readonly TranscriptItem[]) => items.flatMap(item => (item.kind === "notice" ? [`${item.level}: ${item.text}`] : []));
 
 describe("OmpService against fake-omp", function () {
 	this.timeout(20000);
@@ -81,8 +77,7 @@ describe("OmpService against fake-omp", function () {
 					.map(line => JSON.parse(line) as Record<string, unknown>)
 			: [];
 
-	const assistantTexts = (service: OmpService) =>
-		service.transcript.filter(i => i.kind === "assistant").map(i => (i.kind === "assistant" ? i.text : ""));
+	const assistantTexts = (service: OmpService) => service.transcript.filter(i => i.kind === "assistant").map(i => (i.kind === "assistant" ? i.text : ""));
 
 	it("starts, configures subscriptions, streams a prompt to settlement and stops without orphans", async () => {
 		const { service, phases, states, items } = create();
@@ -95,7 +90,10 @@ describe("OmpService against fake-omp", function () {
 		assert.equal(service.session.model?.id, "fake-large");
 		assert.deepEqual(service.session.availableThinkingLevels, ["off", "auto", "low", "medium", "high"]);
 		assert.deepEqual(service.session.todos, [{ name: "Todos", tasks: [{ content: "Fake task", status: "in_progress" }] }]);
-		assert.deepEqual(service.agents.map(a => a.id), ["main"]);
+		assert.deepEqual(
+			service.agents.map(a => a.id),
+			["main"],
+		);
 
 		const commands = sentCommands();
 		const byType = (type: string) => commands.find(c => c.type === type);
@@ -108,7 +106,10 @@ describe("OmpService against fake-omp", function () {
 		assert.deepEqual(outcome, { status: "completed", sessionSettled: true });
 		assert.equal(service.session.phase, "idle");
 		assert.deepEqual(phases.slice(-3), ["submitting", "running", "idle"]);
-		assert.ok(items.some(i => i.kind === "assistant" && i.streaming), "saw streaming updates");
+		assert.ok(
+			items.some(i => i.kind === "assistant" && i.streaming),
+			"saw streaming updates",
+		);
 		assert.deepEqual(
 			service.transcript.map(i => i.kind),
 			["user", "assistant", "turn_summary"],
@@ -155,7 +156,10 @@ describe("OmpService against fake-omp", function () {
 		const byName = new Map(service.session.commands.map(c => [c.name, c]));
 		assert.deepEqual(byName.get("model")?.aliases, ["models"]);
 		assert.equal(byName.get("effort")?.hint, "[level]");
-		assert.deepEqual(byName.get("effort")?.subcommands.map(s => s.name), ["off", "low", "medium", "high", "auto"]);
+		assert.deepEqual(
+			byName.get("effort")?.subcommands.map(s => s.name),
+			["off", "low", "medium", "high", "auto"],
+		);
 		assert.equal(byName.get("skill:codebase-review")?.source, "skill");
 	});
 
@@ -504,7 +508,11 @@ describe("OmpService against fake-omp", function () {
 		const before = sentCommands().length;
 		await second.service.start({ resumeSessionFile: file });
 		assert.equal(second.service.connection.state, "ready");
-		assert.ok(sentCommands().slice(before).some(c => c.type === "new_session"));
+		assert.ok(
+			sentCommands()
+				.slice(before)
+				.some(c => c.type === "new_session"),
+		);
 		assert.notEqual(second.service.session.sessionFile, file);
 		assert.match(second.logger.text("warn"), /no longer exists/);
 		assert.match(notices(second.service.transcript).join("\n"), /^warning: .*no longer exists/m);
@@ -532,8 +540,17 @@ describe("OmpService against fake-omp", function () {
 		const second = create({ tuning: { historyPageLimit: 2 } });
 		const before = sentCommands().length;
 		await second.service.start({ resumeSessionFile: file });
-		const pages = sentCommands().slice(before).filter(c => c.type === "get_messages_page");
-		assert.deepEqual(pages.map(p => [p.limit, p.cursor]), [[2, undefined], [2, "2"], [2, "4"]]);
+		const pages = sentCommands()
+			.slice(before)
+			.filter(c => c.type === "get_messages_page");
+		assert.deepEqual(
+			pages.map(p => [p.limit, p.cursor]),
+			[
+				[2, undefined],
+				[2, "2"],
+				[2, "4"],
+			],
+		);
 		assert.deepEqual(
 			second.service.transcript.map(i => i.kind),
 			["user", "assistant", "turn_summary", "user", "assistant", "turn_summary", "user", "assistant", "turn_summary"],
@@ -798,9 +815,7 @@ describe("OmpService against an in-memory OMP", () => {
 			type: "available_commands_update",
 			commands: [{ name: "effort", input: { hint: "[level]" }, subcommands: [{ name: "auto" }], source: "builtin" }, { name: "" }],
 		});
-		assert.deepEqual(service.session.commands, [
-			{ name: "effort", source: "builtin", aliases: [], hint: "[level]", subcommands: [{ name: "auto" }] },
-		]);
+		assert.deepEqual(service.session.commands, [{ name: "effort", source: "builtin", aliases: [], hint: "[level]", subcommands: [{ name: "auto" }] }]);
 		assert.deepEqual(seen.at(-1), ["effort"]);
 		omp.emit(commandsFrame("model", "skill:review"));
 		assert.deepEqual(commandNames(service), ["model", "skill:review"]);
@@ -820,7 +835,12 @@ describe("OmpService against an in-memory OMP", () => {
 
 	it("requests the slash commands once the launch is ready", async () => {
 		const omp = new MemoryOmp({
-			get_available_commands: () => ({ commands: [{ name: "model", aliases: ["models"], source: "builtin" }, { name: "skill:review", source: "skill" }] }),
+			get_available_commands: () => ({
+				commands: [
+					{ name: "model", aliases: ["models"], source: "builtin" },
+					{ name: "skill:review", source: "skill" },
+				],
+			}),
 		});
 		const { service } = create(omp);
 		await service.start();
@@ -888,7 +908,10 @@ describe("OmpService against an in-memory OMP", () => {
 			const outcome = await service.prompt("/rules", "auto", [], id);
 			assert.equal(outcome.status, "local");
 			assert.deepEqual(userItems(service), [{ kind: "user", id, text: "/rules" }]);
-			assert.deepEqual(service.transcript.map(item => item.kind), ["user", "command_output"]);
+			assert.deepEqual(
+				service.transcript.map(item => item.kind),
+				["user", "command_output"],
+			);
 		});
 
 		it("removes the item when OMP rejects the prompt", async () => {
@@ -944,7 +967,14 @@ describe("OmpService against an in-memory OMP", () => {
 						transport.emit({ type: "agent_start" });
 						transport.emit({ type: "message_end", messageId: "a-1", message: reply("stop") });
 						transport.emit({ type: "agent_end", messages: [] });
-						transport.emit({ type: "prompt_result", id: frame.id, agentInvoked: true, status, sessionSettled: true, ...(status === "error" ? { error: { message: "quota", retryable: false } } : {}) });
+						transport.emit({
+							type: "prompt_result",
+							id: frame.id,
+							agentInvoked: true,
+							status,
+							sessionSettled: true,
+							...(status === "error" ? { error: { message: "quota", retryable: false } } : {}),
+						});
 						return NO_REPLY;
 					},
 				});
@@ -1050,10 +1080,13 @@ describe("OmpService against an in-memory OMP", () => {
 			omp.emit(setStatus("s4", "lsp", "busy"));
 			omp.emit(setStatus("s5", "tmp", ""));
 			await waitFor(() => presentations.length === 5, 1000, "statuses");
-			assert.deepEqual([...service.statuses], [
-				["tier", "tier-router: on (main on)"],
-				["lsp", "busy"],
-			]);
+			assert.deepEqual(
+				[...service.statuses],
+				[
+					["tier", "tier-router: on (main on)"],
+					["lsp", "busy"],
+				],
+			);
 			presentations.length = 0;
 			omp.close(1);
 			await waitFor(() => service.connection.state === "failed", 1000, "process end");
@@ -1070,9 +1103,15 @@ describe("OmpService against an in-memory OMP", () => {
 			await service.start();
 			const usage = await service.getUsage();
 			assert.deepEqual(usage, [
-				{ provider: "Google Antigravity", limits: [{ name: "Gemini Argon — Weekly", account: "me@example.com", usedPercent: 9.6, inUse: false, resets: "in 7d" }] },
+				{
+					provider: "Google Antigravity",
+					limits: [{ name: "Gemini Argon — Weekly", account: "me@example.com", usedPercent: 9.6, inUse: false, resets: "in 7d" }],
+				},
 			]);
-			assert.deepEqual(omp.sent("prompt").map(frame => ({ ...frame, id: undefined })), [{ type: "prompt", message: "/usage", id: undefined }]);
+			assert.deepEqual(
+				omp.sent("prompt").map(frame => ({ ...frame, id: undefined })),
+				[{ type: "prompt", message: "/usage", id: undefined }],
+			);
 			assert.deepEqual(service.transcript, []);
 			assert.equal(service.session.phase, "idle");
 			assert.deepEqual(
@@ -1087,7 +1126,10 @@ describe("OmpService against an in-memory OMP", () => {
 			const { service, logger } = start(usageOmp(REPORT), { stdout: "", code: 1 });
 			await service.start();
 			const [provider] = await service.getUsage();
-			assert.deepEqual(provider.limits.map(limit => limit.name), ["Gemini — Weekly"]);
+			assert.deepEqual(
+				provider.limits.map(limit => limit.name),
+				["Gemini — Weekly"],
+			);
 			assert.match(logger.text("warn"), /omp usage --json failed \(exit 1\): no credentials; limits keep the names \/usage gives/);
 		});
 
@@ -1147,7 +1189,10 @@ describe("OmpService against an in-memory OMP", () => {
 			omp.reply(usagePrompts[0], { agentInvoked: false });
 			assert.equal((await usage).length, 1);
 			assert.equal((await rules).status, "local");
-			assert.deepEqual(omp.sent("prompt").map(frame => frame.message), ["/usage", "/rules"]);
+			assert.deepEqual(
+				omp.sent("prompt").map(frame => frame.message),
+				["/usage", "/rules"],
+			);
 			assert.deepEqual(outputs(service), ["No rules"]);
 		});
 
@@ -1173,7 +1218,10 @@ describe("OmpService against an in-memory OMP", () => {
 			omp.reply(prompts[1], { agentInvoked: false });
 			assert.equal((await usage).length, 1);
 			assert.equal((await rules).status, "local");
-			assert.deepEqual(prompts.map(frame => frame.message), ["/rules", "/usage"]);
+			assert.deepEqual(
+				prompts.map(frame => frame.message),
+				["/rules", "/usage"],
+			);
 			assert.deepEqual(outputs(service), ["No rules"]);
 		});
 
@@ -1210,7 +1258,10 @@ describe("OmpService against an in-memory OMP", () => {
 			const { service, logger } = start(omp);
 			await service.start();
 			await service.abort();
-			assert.deepEqual(omp.written.flatMap(frame => (frame.type === "abort" ? ["abort"] : frame.type === "cancel_subagent" ? [frame.subagentId] : [])), ["abort", "A", "B"]);
+			assert.deepEqual(
+				omp.written.flatMap(frame => (frame.type === "abort" ? ["abort"] : frame.type === "cancel_subagent" ? [frame.subagentId] : [])),
+				["abort", "A", "B"],
+			);
 			assert.match(logger.text("warn"), /Cancelling subagent B after abort failed: .*gone/);
 		});
 	});

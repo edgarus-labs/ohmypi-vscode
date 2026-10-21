@@ -59,7 +59,10 @@ describe("oh-my-pi extension (real OMP)", function () {
 		if (!requestedModel) this.skip();
 		const [, provider, id] = requestedModel;
 		const models = await api.service.listModels();
-		assert.ok(models.some(m => m.provider === provider && m.id === id), `${provider}/${id} is configured in this environment`);
+		assert.ok(
+			models.some(m => m.provider === provider && m.id === id),
+			`${provider}/${id} is configured in this environment`,
+		);
 		await api.service.setModel(provider, id);
 		assert.equal(api.service.session.model?.id, id);
 	});
@@ -81,9 +84,7 @@ describe("oh-my-pi extension (real OMP)", function () {
 	it("runs a real edit, renders it, tracks the change and opens a native diff", async function () {
 		if (!requestedModel) this.skip();
 		const file = path.join(workspace, "sample.txt");
-		const outcome = await api.service.prompt(
-			"Use your edit tool to change the line 'beta' to 'gamma' in sample.txt. Reply with exactly DONE.",
-		);
+		const outcome = await api.service.prompt("Use your edit tool to change the line 'beta' to 'gamma' in sample.txt. Reply with exactly DONE.");
 		assert.equal(outcome.status, "completed");
 		assert.match(fs.readFileSync(file, "utf8"), /gamma/);
 		assert.ok(api.service.transcript.some(i => i.kind === "tool" && i.name === "edit"));

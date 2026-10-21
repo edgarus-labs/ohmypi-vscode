@@ -16,9 +16,10 @@ export function emptySessionView(): SessionView {
  * Options for the effort selector: the value is the user's selector (OMP `configured`),
  * and `auto` names the effort it resolved to once OMP classified the turn.
  */
-export function effortChoices(
-	session: Pick<SessionView, "availableThinkingLevels" | "thinkingSelector" | "thinkingLevel" | "thinkingResolved">,
-): { value: string | undefined; options: Array<{ value: string; label: string }> } {
+export function effortChoices(session: Pick<SessionView, "availableThinkingLevels" | "thinkingSelector" | "thinkingLevel" | "thinkingResolved">): {
+	value: string | undefined;
+	options: Array<{ value: string; label: string }>;
+} {
 	const value = session.thinkingSelector ?? session.thinkingLevel;
 	const options = session.availableThinkingLevels.map(level => ({
 		value: level,

@@ -255,9 +255,7 @@ const UNC_PATH = /^[\\/]{2}/;
 function launchCommand(executable: string, args: string[], cwd: string, win: boolean): [string, string[], boolean] {
 	if (!win || !/\.(cmd|bat)$/i.test(executable)) return [executable, args, false];
 	if (UNC_PATH.test(cwd)) {
-		throw new Error(
-			`${path.win32.basename(executable)} runs through cmd.exe, which cannot run in the UNC folder ${cwd}; set omp.executablePath to omp.exe`,
-		);
+		throw new Error(`${path.win32.basename(executable)} runs through cmd.exe, which cannot run in the UNC folder ${cwd}; set omp.executablePath to omp.exe`);
 	}
 	const line = [executable.replace(CMD_META, "^$1"), ...args.map(cmdArgument)].join(" ");
 	return [process.env.ComSpec ?? systemProgram("cmd.exe"), ["/d", "/s", "/c", `"${line}"`], true];

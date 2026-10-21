@@ -232,7 +232,10 @@ describe("ChatView", () => {
 		it("allows blob: images so pasted and dropped image chips show their preview", () => {
 			const view = resolve(fakeView());
 			const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(view.webview.html)?.[1] ?? "";
-			const imgSrc = csp.split(";").map(directive => directive.trim()).find(directive => directive.startsWith("img-src "));
+			const imgSrc = csp
+				.split(";")
+				.map(directive => directive.trim())
+				.find(directive => directive.startsWith("img-src "));
 			assert.deepEqual(imgSrc?.split(" "), ["img-src", "vscode-resource:", "data:", "blob:"]);
 			assert.match(csp, /default-src 'none'/);
 		});
@@ -280,7 +283,10 @@ describe("ChatView", () => {
 		it("opens only sessions it offered", async () => {
 			service.listSessions = async () => [summary("a")];
 			const webview = await ready();
-			assert.deepEqual(webview.ofType("recentSessions")[0].sessions.map(session => session.title), ["a"]);
+			assert.deepEqual(
+				webview.ofType("recentSessions")[0].sessions.map(session => session.title),
+				["a"],
+			);
 			webview.receive({ type: "openSession", path: path.resolve("/etc/other.jsonl") });
 			await settle();
 			assert.deepEqual(service.switched, []);
@@ -340,7 +346,14 @@ describe("ChatView", () => {
 			await settle();
 			assert.deepEqual(host.opened, []);
 			assert.deepEqual(host.diffs, []);
-			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("Ignoring")).length, 4, logger.text("warn"));
+			assert.equal(
+				logger
+					.text("warn")
+					.split("\n")
+					.filter(line => line.includes("Ignoring")).length,
+				4,
+				logger.text("warn"),
+			);
 		});
 
 		it("opens web and mail links in the browser exactly as written", async () => {
@@ -362,7 +375,14 @@ describe("ChatView", () => {
 			}
 			await settle();
 			assert.deepEqual(stub.callsTo("env.openExternal"), []);
-			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("Not opening")).length, 5, logger.text("warn"));
+			assert.equal(
+				logger
+					.text("warn")
+					.split("\n")
+					.filter(line => line.includes("Not opening")).length,
+				5,
+				logger.text("warn"),
+			);
 		});
 
 		it("reports a failed open as an error notice", async () => {
@@ -408,7 +428,14 @@ describe("ChatView", () => {
 				process.off("unhandledRejection", onRejection);
 			}
 			assert.deepEqual(rejections, []);
-			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("not an object")).length, 2, logger.text("warn"));
+			assert.equal(
+				logger
+					.text("warn")
+					.split("\n")
+					.filter(line => line.includes("not an object")).length,
+				2,
+				logger.text("warn"),
+			);
 		});
 
 		it("ignores a thinking level that is not text", async () => {
@@ -441,7 +468,14 @@ describe("ChatView", () => {
 			await settle();
 			assert.deepEqual(prompts, []);
 			assert.deepEqual(webview.ofType("sendResult"), []);
-			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("Ignoring a prompt")).length, 4, logger.text("warn"));
+			assert.equal(
+				logger
+					.text("warn")
+					.split("\n")
+					.filter(line => line.includes("Ignoring a prompt")).length,
+				4,
+				logger.text("warn"),
+			);
 		});
 	});
 
@@ -507,7 +541,14 @@ describe("ChatView", () => {
 				return Promise.resolve({ status: "completed", sessionSettled: true });
 			};
 			const webview = await ready();
-			webview.receive({ type: "send", id: "s5", text: "hello", mode: "auto", includeContext: false, attachments: [{ id: "a1", kind: "file", path: path.resolve("/work/repo/src/a.ts"), label: "a.ts" }] });
+			webview.receive({
+				type: "send",
+				id: "s5",
+				text: "hello",
+				mode: "auto",
+				includeContext: false,
+				attachments: [{ id: "a1", kind: "file", path: path.resolve("/work/repo/src/a.ts"), label: "a.ts" }],
+			});
 			await settle();
 			const text = `hello\n\nAttached: @${path.join("src", "a.ts")}`;
 			assert.deepEqual(webview.ofType("item"), [{ type: "item", item: { kind: "user", id: "pending-1", text, pending: true } }]);
@@ -533,7 +574,10 @@ describe("ChatView", () => {
 			webview.receive(send("s8"));
 			await settle();
 			assert.deepEqual(pendingIds, ["pending-2"]);
-			assert.deepEqual(webview.ofType("item").map(message => message.item.id), ["pending-2"]);
+			assert.deepEqual(
+				webview.ofType("item").map(message => message.item.id),
+				["pending-2"],
+			);
 		});
 
 		it("drops the pending item when OMP cannot be started", async () => {

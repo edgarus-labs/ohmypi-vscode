@@ -1,7 +1,7 @@
 import * as assert from "node:assert/strict";
 import * as path from "node:path";
 import { openToolFile, workspaceRoots } from "../../src/vscode/workspaceFiles";
-import { FileSystemError, Range, stub, Uri, workspace } from "./stubs/vscode";
+import { FileSystemError, type Range, stub, Uri, workspace } from "./stubs/vscode";
 
 describe("workspace files", () => {
 	const cwd = path.resolve("/work/repo");

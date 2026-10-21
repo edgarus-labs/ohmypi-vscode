@@ -8,11 +8,7 @@ function shape(lines: ReturnType<typeof codeLines>): string[][] {
 
 describe("codeLines", () => {
 	it("pads gutter numbers and turns a skipped range into one empty line", () => {
-		assert.deepEqual(shape(codeLines("a\nb\nc", ["9", "10-40", "41"], undefined, undefined)), [
-			[" 9", "text:a"],
-			["  "],
-			["41", "text:c"],
-		]);
+		assert.deepEqual(shape(codeLines("a\nb\nc", ["9", "10-40", "41"], undefined, undefined)), [[" 9", "text:a"], ["  "], ["41", "text:c"]]);
 	});
 
 	it("splits tokens that span lines so every line keeps its colors", () => {

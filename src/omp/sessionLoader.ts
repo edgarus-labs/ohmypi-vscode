@@ -102,11 +102,7 @@ export class SessionLoader {
 				let cursor: string | undefined;
 				let total: number | undefined;
 				do {
-					const page = await client.request(
-						"get_messages_page",
-						{ limit: this.#historyPageLimit, ...(cursor ? { cursor } : {}) },
-						{ timeoutMs },
-					);
+					const page = await client.request("get_messages_page", { limit: this.#historyPageLimit, ...(cursor ? { cursor } : {}) }, { timeoutMs });
 					if (total !== undefined && page.totalMessages !== total) {
 						throw new OmpRequestError("Message pages changed while loading", "get_messages_page", "stale_cursor");
 					}

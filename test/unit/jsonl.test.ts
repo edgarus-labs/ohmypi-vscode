@@ -133,7 +133,10 @@ describe("ChunkReassembler", () => {
 		const frame = { type: "response", id: "x", data: "ąćęłńóśźż 😀 long enough" };
 		const chunks = chunkFrames(frame, 7);
 		const results = chunks.map(c => r.push(c));
-		assert.deepEqual(results.slice(0, -1), chunks.slice(0, -1).map(() => ({})));
+		assert.deepEqual(
+			results.slice(0, -1),
+			chunks.slice(0, -1).map(() => ({})),
+		);
 		assert.deepEqual(results.at(-1), { frame });
 	});
 
@@ -216,7 +219,10 @@ describe("ChunkReassembler", () => {
 		assert.ok(canonical.endsWith("=="), "the fixture chunk ends in one byte of a final group");
 		assert.deepEqual(new ChunkReassembler(LIMITS).push(first), {});
 		assert.ok(r.push({ ...first, data: canonical.replace(/=+$/, "") }).error, "missing padding");
-		assert.ok(r.push({ ...first, data: `${canonical.slice(0, -3)}${String.fromCharCode(canonical.charCodeAt(canonical.length - 3) + 1)}==` }).error, "non-zero trailing bits");
+		assert.ok(
+			r.push({ ...first, data: `${canonical.slice(0, -3)}${String.fromCharCode(canonical.charCodeAt(canonical.length - 3) + 1)}==` }).error,
+			"non-zero trailing bits",
+		);
 		assert.ok(r.push({ ...first, data: canonical.replace(/\+/g, "-").replace(/\//g, "_").replace(/^(.)/, "-") }).error, "URL-safe alphabet");
 		assert.ok(r.push({ ...first, data: ` ${canonical}` }).error, "whitespace");
 	});

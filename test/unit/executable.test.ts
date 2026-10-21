@@ -25,10 +25,7 @@ describe("resolveExecutable", () => {
 			() => resolveExecutable("./tools/omp", env, "linux", fsWith("./tools/omp")),
 			(error: Error) => /omp\.executablePath/.test(error.message) && /absolute/.test(error.message) && error.message.includes("./tools/omp"),
 		);
-		assert.throws(
-			() => resolveExecutable("tools\\omp.cmd", { USERPROFILE: "C:\\Users\\u" }, "win32", fsWith("tools\\omp.cmd")),
-			/absolute/,
-		);
+		assert.throws(() => resolveExecutable("tools\\omp.cmd", { USERPROFILE: "C:\\Users\\u" }, "win32", fsWith("tools\\omp.cmd")), /absolute/);
 	});
 
 	it("rejects a configured win32 path that Windows cannot launch", () => {
@@ -81,10 +78,7 @@ describe("resolveExecutable", () => {
 	it("lists every location tried when nothing is found", () => {
 		assert.throws(
 			() => resolveExecutable("", env, "linux", fsWith()),
-			(error: Error) =>
-				["/usr/bin/omp", "/opt/omp/bin/omp", "/home/u/.local/bin/omp", "/home/u/.bun/bin/omp"].every(p =>
-					error.message.includes(p),
-				),
+			(error: Error) => ["/usr/bin/omp", "/opt/omp/bin/omp", "/home/u/.local/bin/omp", "/home/u/.bun/bin/omp"].every(p => error.message.includes(p)),
 		);
 	});
 });

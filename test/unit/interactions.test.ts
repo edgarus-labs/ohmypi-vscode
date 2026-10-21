@@ -4,7 +4,7 @@ import { deferred } from "../../src/shared/deferred";
 import { InteractionController, type InteractionSurface, PresentationHandler } from "../../src/ui/interactions";
 import type { PendingInteraction } from "../../src/webview/protocol";
 import { type MemoryLogger, memoryLogger, tick } from "./helpers";
-import { EventEmitter, stub, Uri } from "./stubs/vscode";
+import { EventEmitter, stub } from "./stubs/vscode";
 
 class FakeSurface implements InteractionSurface {
 	visible = true;
@@ -79,7 +79,10 @@ describe("InteractionController", () => {
 			controller.list().map(pending => pending.request.id),
 			["c1"],
 		);
-		assert.deepEqual(surface.shown.map(pending => pending.request.id), ["c1"]);
+		assert.deepEqual(
+			surface.shown.map(pending => pending.request.id),
+			["c1"],
+		);
 
 		controller.respond("c1", { kind: "confirmed", confirmed: true });
 		controller.respond("c1", { kind: "confirmed", confirmed: false });
@@ -130,7 +133,14 @@ describe("InteractionController", () => {
 			controller.list().map(pending => pending.request.id),
 			["c1", "s1", "q1"],
 		);
-		assert.equal(logger.text("warn").split("\n").filter(line => line.includes("does not fit")).length, 7, logger.text("warn"));
+		assert.equal(
+			logger
+				.text("warn")
+				.split("\n")
+				.filter(line => line.includes("does not fit")).length,
+			7,
+			logger.text("warn"),
+		);
 
 		controller.respond("s1", { kind: "value", value: "a" });
 		controller.respond("c1", { kind: "cancelled" });

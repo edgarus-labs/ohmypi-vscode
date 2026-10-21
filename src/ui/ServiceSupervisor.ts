@@ -115,7 +115,9 @@ export class ServiceSupervisor implements vscode.Disposable {
 	private rebuildBuiltAhead(): void {
 		const stale = this.current;
 		this.current = undefined;
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.subscriptions = [];
 		for (const consumer of this.options.consumers) consumer.setService(undefined);
 		stale?.dispose();
@@ -283,7 +285,9 @@ export class ServiceSupervisor implements vscode.Disposable {
 		const service = this.current;
 		this.current = undefined;
 		this.starting = undefined;
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.subscriptions = [];
 		void this.setContext("omp.busy", false);
 		void this.setContext("omp.hasThinkingLevels", false);
@@ -306,7 +310,9 @@ export class ServiceSupervisor implements vscode.Disposable {
 		this.disposed = true;
 		const service = this.current;
 		this.current = undefined;
-		this.subscriptions.forEach(subscription => subscription.dispose());
+		this.subscriptions.forEach(subscription => {
+			subscription.dispose();
+		});
 		this.trustSubscription.dispose();
 		service?.dispose();
 	}

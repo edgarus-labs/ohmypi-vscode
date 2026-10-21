@@ -58,14 +58,7 @@ function buildSection(details: HTMLDetailsElement): void {
 }
 
 /** Collapsible section whose body is built only once it is first opened; a body that fails to build shows why. */
-export function collapsible(
-	state: OpenState,
-	key: string,
-	summary: Child[],
-	body: () => Node,
-	defaultOpen = false,
-	className = "",
-): HTMLDetailsElement {
+export function collapsible(state: OpenState, key: string, summary: Child[], body: () => Node, defaultOpen = false, className = ""): HTMLDetailsElement {
 	const details = h("details", { class: className });
 	details.append(h("summary", undefined, ...summary));
 	sectionBodies.set(details, { build: body, built: false });

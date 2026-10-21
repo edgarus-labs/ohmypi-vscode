@@ -50,7 +50,8 @@ describe("webview session chrome", () => {
 	};
 
 	it("selects no effort when the session reports none or one the model does not offer", () => {
-		const selected = () => [...(root.querySelector("select.thinking-select") as HTMLSelectElement).options].filter(option => option.selected).map(option => option.value);
+		const selected = () =>
+			[...(root.querySelector("select.thinking-select") as HTMLSelectElement).options].filter(option => option.selected).map(option => option.value);
 		app.handle(reset({ session: session({ availableThinkingLevels: ["auto", "low", "high"], thinkingLevel: "high" }) }));
 		assert.deepEqual(selected(), ["high"]);
 		app.handle({ type: "session", session: session({ availableThinkingLevels: ["low", "high"], thinkingSelector: "auto" }) });
@@ -169,7 +170,13 @@ describe("webview session chrome", () => {
 			const resume = () => root.querySelector<HTMLButtonElement>(".header button.resume-tier");
 			app.handle(reset({ statuses: [{ key: "tier", text: PAUSED }] }));
 			resume()?.focus();
-			app.handle({ type: "statuses", statuses: [{ key: "tier", text: PAUSED }, { key: "lsp", text: "indexing" }] });
+			app.handle({
+				type: "statuses",
+				statuses: [
+					{ key: "tier", text: PAUSED },
+					{ key: "lsp", text: "indexing" },
+				],
+			});
 			assert.ok(resume() && document.activeElement === resume());
 		});
 
@@ -293,7 +300,11 @@ describe("webview session chrome", () => {
 			assert.deepEqual(headings, ["Anthropic"]);
 			const rows = [...(popup()?.querySelectorAll(".usage-limit") ?? [])] as HTMLElement[];
 			assert.deepEqual(
-				rows.map(row => [row.querySelector(".usage-limit-name")?.textContent, row.querySelector(".usage-limit-percent")?.textContent, row.querySelector(".usage-limit-resets")?.textContent]),
+				rows.map(row => [
+					row.querySelector(".usage-limit-name")?.textContent,
+					row.querySelector(".usage-limit-percent")?.textContent,
+					row.querySelector(".usage-limit-resets")?.textContent,
+				]),
 				[
 					["Claude 5 Hour", "4%", "in 4h"],
 					["Claude 7 Day", "85%", ""],

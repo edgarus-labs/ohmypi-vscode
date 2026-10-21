@@ -25,7 +25,9 @@ describe("view containers in the manifest", () => {
 		const ids = Object.values(containers).flatMap(list => list.map(container => container.id));
 		assert.deepEqual(Object.keys(views).sort(), [...ids].sort());
 		assert.deepEqual(
-			Object.values(views).flat().map(view => [view.id, view.type ?? "tree", view.when]),
+			Object.values(views)
+				.flat()
+				.map(view => [view.id, view.type ?? "tree", view.when]),
 			[
 				["omp.chat", "webview", undefined],
 				["omp.agents", "tree", undefined],
@@ -41,7 +43,11 @@ describe("view containers in the manifest", () => {
 	});
 
 	it("gives a welcome text only to views that exist", () => {
-		const viewIds = new Set(Object.values(views).flat().map(view => view.id));
+		const viewIds = new Set(
+			Object.values(views)
+				.flat()
+				.map(view => view.id),
+		);
 		for (const welcome of manifest.contributes.viewsWelcome) assert.ok(viewIds.has(welcome.view), welcome.view);
 	});
 });

@@ -118,7 +118,7 @@ describe("splitUserMessage", () => {
 	});
 
 	it("keeps an editor context whose selection contains the closing tag", () => {
-		const editorContext = "<editor-context>\nselection:\n```\nconst end = \"</editor-context>\";\nconst escaped = \"<\\/editor-context>\";\n```\n</editor-context>";
+		const editorContext = '<editor-context>\nselection:\n```\nconst end = "</editor-context>";\nconst escaped = "<\\/editor-context>";\n```\n</editor-context>';
 		const { message } = composePrompt({ text: "review", attachments: [], cwd, editorContext });
 		assert.equal(message.split("</editor-context>").length, 2);
 		assert.deepEqual(splitUserMessage(message), { text: "review", editorContext, pasted: [], files: [] });
@@ -157,7 +157,10 @@ describe("admitImages", () => {
 		];
 		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, files), {
 			accepted: files.slice(0, 2),
-			rejected: ["Image c.svg was not attached: only PNG, JPEG, GIF and WebP images are supported.", "Image d.tiff was not attached: only PNG, JPEG, GIF and WebP images are supported."],
+			rejected: [
+				"Image c.svg was not attached: only PNG, JPEG, GIF and WebP images are supported.",
+				"Image d.tiff was not attached: only PNG, JPEG, GIF and WebP images are supported.",
+			],
 		});
 	});
 

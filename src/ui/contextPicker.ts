@@ -32,7 +32,8 @@ function expandBraces(pattern: string): string[] {
  * `search.exclude` switch on. Patterns with a `when` condition stay included.
  */
 function workspaceExclude(): string {
-	const enabled = (setting: unknown) => (isRecord(setting) ? Object.entries(setting).flatMap(([pattern, on]) => (on === true ? expandBraces(pattern) : [])) : []);
+	const enabled = (setting: unknown) =>
+		isRecord(setting) ? Object.entries(setting).flatMap(([pattern, on]) => (on === true ? expandBraces(pattern) : [])) : [];
 	const patterns = new Set([
 		...ALWAYS_EXCLUDED,
 		...enabled(vscode.workspace.getConfiguration("files").get("exclude")),

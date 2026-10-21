@@ -38,7 +38,10 @@ describe("OmpRpcClient", () => {
 		transport.emit(READY_V2);
 		await started;
 		assert.equal(client.protocolVersion, 2);
-		assert.deepEqual(transport.sent("negotiate_protocol").map(f => f.protocolVersion), [2]);
+		assert.deepEqual(
+			transport.sent("negotiate_protocol").map(f => f.protocolVersion),
+			[2],
+		);
 	});
 
 	it("stays on v1 without negotiating when the server does not advertise v2", async () => {
@@ -230,7 +233,13 @@ describe("OmpRpcClient", () => {
 		const unknown: UnknownFrame[] = [];
 		client.onAvailableCommands(frame => seen.push(frame.commands.map(c => c.name)));
 		client.onUnknownFrame(f => unknown.push(f));
-		transport.emit({ type: "available_commands_update", commands: [{ name: "model", source: "builtin" }, { name: "skill:x", source: "skill" }] });
+		transport.emit({
+			type: "available_commands_update",
+			commands: [
+				{ name: "model", source: "builtin" },
+				{ name: "skill:x", source: "skill" },
+			],
+		});
 		assert.deepEqual(seen, [["model", "skill:x"]]);
 		assert.deepEqual(unknown, []);
 		assert.doesNotMatch(logger.text("debug"), /available_commands_update ignored/);

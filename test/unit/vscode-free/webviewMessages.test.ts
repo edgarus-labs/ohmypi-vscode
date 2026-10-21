@@ -63,9 +63,6 @@ describe("transcript messages", () => {
 
 	it("titles the turn summary with the turn's token counts", () => {
 		view.upsert({ kind: "turn_summary", id: "s1", status: "completed", usage: { input: 1_200, output: 30, cacheRead: 15_000, cacheWrite: 0 } });
-		assert.equal(
-			view.element.querySelector(".turn-summary")?.getAttribute("title"),
-			"1,200 input · 15,000 cache read · 0 cache write · 30 output tokens",
-		);
+		assert.equal(view.element.querySelector(".turn-summary")?.getAttribute("title"), "1,200 input · 15,000 cache read · 0 cache write · 30 output tokens");
 	});
 });

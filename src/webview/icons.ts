@@ -65,7 +65,14 @@ export function icon(name: IconName, size = 16): SVGSVGElement {
 /** Tiny ring meter; set the arc's `stroke-dasharray` to `"<percent> 100"` to fill it. */
 export function ringMeter(size = 14): { svg: SVGSVGElement; arc: SVGCircleElement } {
 	const svg = document.createElementNS(SVG_NS, "svg");
-	for (const [attr, value] of Object.entries({ width: String(size), height: String(size), viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false", class: "ring" })) {
+	for (const [attr, value] of Object.entries({
+		width: String(size),
+		height: String(size),
+		viewBox: "0 0 16 16",
+		"aria-hidden": "true",
+		focusable: "false",
+		class: "ring",
+	})) {
 		svg.setAttribute(attr, value);
 	}
 	const circles = ["ring-track", "ring-fill"].map(className => {

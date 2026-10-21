@@ -32,7 +32,11 @@ function plural(count: number, noun: string): string {
 }
 
 function linkButton(label: string, onClick: (button: HTMLButtonElement) => void, action?: string): HTMLButtonElement {
-	const button: HTMLButtonElement = h("button", { class: "link", attrs: { type: "button", ...(action ? { "data-action": action } : {}) }, onClick: () => onClick(button) }, label);
+	const button: HTMLButtonElement = h(
+		"button",
+		{ class: "link", attrs: { type: "button", ...(action ? { "data-action": action } : {}) }, onClick: () => onClick(button) },
+		label,
+	);
 	return button;
 }
 

@@ -15,7 +15,10 @@ describe("webview session chrome", () => {
 	useDom();
 
 	it("keeps the ticking elapsed time out of the announced status", () => {
-		const header = new Header(() => {}, () => {});
+		const header = new Header(
+			() => {},
+			() => {},
+		);
 		header.render({ session: session({ phase: "running" }), connection: { state: "ready" }, pendingInteractions: 0, unavailable: undefined });
 		const status = header.element.querySelector('[role="status"]');
 		assert.equal(status?.textContent, "working");

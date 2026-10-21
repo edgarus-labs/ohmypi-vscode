@@ -253,9 +253,7 @@ export class ProcessLifecycle {
 			warning = await step(this.#hooks.prepare(client, binding));
 		} catch (error) {
 			if (generation === this.#generation) this.#detach(errorMessage(error));
-			await proc
-				?.shutdown(this.#graceMs)
-				.catch(shutdownError => this.#logger.error("Failed to shut down OMP after a failed start", shutdownError));
+			await proc?.shutdown(this.#graceMs).catch(shutdownError => this.#logger.error("Failed to shut down OMP after a failed start", shutdownError));
 			client?.dispose();
 			throw error;
 		} finally {

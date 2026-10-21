@@ -60,8 +60,7 @@ function tokenEnd(text: string, caret: number): number {
 function findCommand(commands: readonly SlashCommandView[], typed: string): SlashCommandView | undefined {
 	const wanted = typed.toLowerCase();
 	return (
-		commands.find(command => command.name.toLowerCase() === wanted) ??
-		commands.find(command => command.aliases.some(alias => alias.toLowerCase() === wanted))
+		commands.find(command => command.name.toLowerCase() === wanted) ?? commands.find(command => command.aliases.some(alias => alias.toLowerCase() === wanted))
 	);
 }
 

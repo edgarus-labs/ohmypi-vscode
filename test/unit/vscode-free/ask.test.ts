@@ -20,22 +20,15 @@ describe("buildAskAnswers", () => {
 	});
 
 	it("single-select keeps at most one option and drops it when free text is given", () => {
-		assert.deepEqual(buildAskAnswers([questions[0]], [{ selected: ["SQLite", "Postgres"], custom: "" }]), [
-			{ id: "db", selectedOptions: ["SQLite"] },
-		]);
-		assert.deepEqual(buildAskAnswers([questions[0]], [{ selected: ["SQLite"], custom: "Mongo" }]), [
-			{ id: "db", selectedOptions: [], customInput: "Mongo" },
-		]);
+		assert.deepEqual(buildAskAnswers([questions[0]], [{ selected: ["SQLite", "Postgres"], custom: "" }]), [{ id: "db", selectedOptions: ["SQLite"] }]);
+		assert.deepEqual(buildAskAnswers([questions[0]], [{ selected: ["SQLite"], custom: "Mongo" }]), [{ id: "db", selectedOptions: [], customInput: "Mongo" }]);
 	});
 
 	it("multi-select dedupes, drops unknown labels, keeps option order, may be empty, allows free text", () => {
-		assert.deepEqual(
-			buildAskAnswers([questions[1]], [{ selected: ["Search", "Nope", "Auth", "Search"], custom: " extra " }]),
-			[{ id: "features", selectedOptions: ["Auth", "Search"], customInput: "extra" }],
-		);
-		assert.deepEqual(buildAskAnswers([questions[1]], [{ selected: [], custom: "   " }]), [
-			{ id: "features", selectedOptions: [] },
+		assert.deepEqual(buildAskAnswers([questions[1]], [{ selected: ["Search", "Nope", "Auth", "Search"], custom: " extra " }]), [
+			{ id: "features", selectedOptions: ["Auth", "Search"], customInput: "extra" },
 		]);
+		assert.deepEqual(buildAskAnswers([questions[1]], [{ selected: [], custom: "   " }]), [{ id: "features", selectedOptions: [] }]);
 	});
 
 	it("lists a label once when two options share it", () => {

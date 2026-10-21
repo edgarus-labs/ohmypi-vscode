@@ -166,6 +166,9 @@ describe("AgentRegistry", () => {
 		const registry = new AgentRegistry();
 		registry.applyFrame(lifecycle("Anna", "started"));
 		registry.clearSubagents();
-		assert.deepEqual(registry.agents.map(a => a.id), ["main"]);
+		assert.deepEqual(
+			registry.agents.map(a => a.id),
+			["main"],
+		);
 	});
 });

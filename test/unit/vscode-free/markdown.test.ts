@@ -39,7 +39,10 @@ describe("renderMarkdown", () => {
 	});
 
 	it("renders italics with asterisks or underscores, but not inside words or products", () => {
-		assert.equal(renderMarkdown("an *em* and _under_ word, snake_case_name and 2*3*4"), "<p>an <em>em</em> and <em>under</em> word, snake_case_name and 2*3*4</p>");
+		assert.equal(
+			renderMarkdown("an *em* and _under_ word, snake_case_name and 2*3*4"),
+			"<p>an <em>em</em> and <em>under</em> word, snake_case_name and 2*3*4</p>",
+		);
 		assert.equal(renderMarkdown("**bold** then *it*"), "<p><strong>bold</strong> then <em>it</em></p>");
 	});
 
@@ -58,7 +61,7 @@ describe("renderMarkdown", () => {
 		const html = renderMarkdown('https://x.dev/"onmouseover="a <https://y.dev/>');
 		assert.ok(html.includes('data-url="https://x.dev/"'), html);
 		assert.ok(html.includes('data-url="https://y.dev/"'), html);
-		assert.equal(html.includes("onmouseover=\""), false, html);
+		assert.equal(html.includes('onmouseover="'), false, html);
 	});
 
 	it("renders inline code and bold", () => {
@@ -91,7 +94,7 @@ describe("renderMarkdown", () => {
 	});
 
 	it("escapes quotes and angle brackets of a file path in link attributes", () => {
-		const html = renderMarkdown("`src/\"'><svg onload=x>.ts` [y](src/\"><img>.ts)");
+		const html = renderMarkdown('`src/"\'><svg onload=x>.ts` [y](src/"><img>.ts)');
 		assert.equal(html.includes("<svg"), false, html);
 		assert.equal(html.includes("<img"), false, html);
 		const link = renderMarkdown("`src/\"'><b>.ts`");
@@ -137,6 +140,9 @@ describe("renderMarkdown", () => {
 	});
 
 	it("renders headings as h3–h6 elements outside paragraphs", () => {
-		assert.equal(renderMarkdown("intro\n# Title\n## Sub `x`\n#### Deep\ntext"), '<p>intro</p><h3 class="md-h">Title</h3><h4 class="md-h">Sub <code>x</code></h4><h6 class="md-h">Deep</h6><p>text</p>');
+		assert.equal(
+			renderMarkdown("intro\n# Title\n## Sub `x`\n#### Deep\ntext"),
+			'<p>intro</p><h3 class="md-h">Title</h3><h4 class="md-h">Sub <code>x</code></h4><h6 class="md-h">Deep</h6><p>text</p>',
+		);
 	});
 });

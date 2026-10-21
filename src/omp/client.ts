@@ -102,9 +102,7 @@ const LOCAL_FAILURES: ReadonlySet<string | undefined> = new Set(["timeout", "clo
 
 function abbreviate(frame: unknown): string {
 	const json = JSON.stringify(frame, (_key, value: unknown) =>
-		typeof value === "string" && value.length > TRACE_STRING_LIMIT
-			? `${value.slice(0, TRACE_STRING_LIMIT)}…(${value.length} chars)`
-			: value,
+		typeof value === "string" && value.length > TRACE_STRING_LIMIT ? `${value.slice(0, TRACE_STRING_LIMIT)}…(${value.length} chars)` : value,
 	);
 	return json.length > TRACE_FRAME_LIMIT ? `${json.slice(0, TRACE_FRAME_LIMIT)}…` : json;
 }
@@ -206,10 +204,7 @@ export class OmpRpcClient implements Disposable {
 			value: value => this.#receive(value),
 			error: error => this.#logger.warn("OMP stdout could not be decoded", error),
 		});
-		this.#subscriptions = [
-			transport.onData(chunk => this.#decoder.push(chunk)),
-			transport.onClose(close => this.#handleClose(close)),
-		];
+		this.#subscriptions = [transport.onData(chunk => this.#decoder.push(chunk)), transport.onClose(close => this.#handleClose(close))];
 	}
 
 	get protocolVersion(): number {
@@ -223,10 +218,7 @@ export class OmpRpcClient implements Disposable {
 	async start(): Promise<void> {
 		const timer =
 			this.#readyTimeoutMs > 0
-				? setTimeout(
-						() => this.#ready.reject(new Error(`OMP did not send a ready frame within ${this.#readyTimeoutMs} ms`)),
-						this.#readyTimeoutMs,
-					)
+				? setTimeout(() => this.#ready.reject(new Error(`OMP did not send a ready frame within ${this.#readyTimeoutMs} ms`)), this.#readyTimeoutMs)
 				: undefined;
 		let ready: ReadyFrame;
 		try {
@@ -330,9 +322,7 @@ export class OmpRpcClient implements Disposable {
 		if (limit !== undefined) {
 			const bytes = Buffer.byteLength(line, "utf8");
 			if (bytes > limit) {
-				this.#logger.warn(
-					`OMP ${frame.type} frame of ${bytes} bytes exceeds the ${limit}-byte frame limit OMP advertised; sent as one line`,
-				);
+				this.#logger.warn(`OMP ${frame.type} frame of ${bytes} bytes exceeds the ${limit}-byte frame limit OMP advertised; sent as one line`);
 			}
 		}
 		this.#transport.write(line, onError);

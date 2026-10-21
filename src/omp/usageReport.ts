@@ -1,5 +1,6 @@
 import type { ProviderUsage, UsageLimit } from "./api";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matches ANSI escape sequences
 const ANSI = /\u001b\[[0-9;]*m/g;
 const USED = /^\s+(?<account>.+?): [\d.]+(?:%| \S+) used \((?<left>[\d.]+)% left\)(?<inUse>.*in use by this session)?/;
 const RESETS = /^\s+resets (?<when>.+)$/;

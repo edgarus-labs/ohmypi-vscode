@@ -48,9 +48,7 @@ export function resolveExecutable(
 			throw new Error(`omp.executablePath must name a .exe, .com, .cmd or .bat file on Windows: ${expanded}`);
 		}
 		if (fileSystem.isExecutableFile(expanded)) return expanded;
-		throw new Error(
-			`The omp executable configured in omp.executablePath was not found or is not executable: ${expanded}`,
-		);
+		throw new Error(`The omp executable configured in omp.executablePath was not found or is not executable: ${expanded}`);
 	}
 
 	const names = win ? ["omp.exe", "omp.cmd"] : ["omp"];
@@ -69,7 +67,5 @@ export function resolveExecutable(
 			tried.push(candidate);
 		}
 	}
-	throw new Error(
-		`Could not find the omp executable. Install oh-my-pi or set omp.executablePath. Tried:\n${tried.map(p => `  ${p}`).join("\n")}`,
-	);
+	throw new Error(`Could not find the omp executable. Install oh-my-pi or set omp.executablePath. Tried:\n${tried.map(p => `  ${p}`).join("\n")}`);
 }

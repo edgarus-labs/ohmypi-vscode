@@ -14,7 +14,10 @@ export interface ImageBudget {
 }
 
 /** Splits image files into those of a supported format that fit the per-image, count and total limits and messages for the rest. */
-export function admitImages<T extends { name: string; size: number; type: string }>(budget: ImageBudget, files: readonly T[]): { accepted: T[]; rejected: string[] } {
+export function admitImages<T extends { name: string; size: number; type: string }>(
+	budget: ImageBudget,
+	files: readonly T[],
+): { accepted: T[]; rejected: string[] } {
 	let { count, bytes } = budget;
 	const accepted: T[] = [];
 	const rejected: string[] = [];

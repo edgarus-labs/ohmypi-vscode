@@ -1,5 +1,4 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { Logger, ToolExecutionEvent } from "../omp/api";
 import { toolArgPaths, toolResultFiles } from "../shared/toolFiles";
 import { isWithinRoots, lineDelta, pathKey, resolveToolPath } from "./changePaths";

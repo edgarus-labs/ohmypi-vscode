@@ -86,7 +86,9 @@ describe("InteractionsView", () => {
 		assert.ok(other);
 		other.value = "teal";
 		other.dispatchEvent(event("keydown", { key: "Enter", isComposing: false }));
-		assert.deepEqual(posted, [{ type: "respond", id: "q1", response: { kind: "answers", answers: [{ id: "color", selectedOptions: [], customInput: "teal" }] } }]);
+		assert.deepEqual(posted, [
+			{ type: "respond", id: "q1", response: { kind: "answers", answers: [{ id: "color", selectedOptions: [], customInput: "teal" }] } },
+		]);
 	});
 
 	it("cancels a question it cannot show, so OMP does not wait for its timeout", () => {

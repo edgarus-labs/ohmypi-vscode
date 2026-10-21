@@ -52,7 +52,13 @@ export function transcriptToMarkdown(title: string, items: readonly TranscriptIt
 				break;
 			case "assistant": {
 				const parts = [`## Assistant${item.model ? ` (${item.model})` : ""}`];
-				if (item.thinking) parts.push(item.thinking.split("\n").map(line => `> ${line}`).join("\n"));
+				if (item.thinking)
+					parts.push(
+						item.thinking
+							.split("\n")
+							.map(line => `> ${line}`)
+							.join("\n"),
+					);
 				if (item.text) parts.push(item.text);
 				if (item.errorMessage) parts.push(`**error:** ${item.errorMessage}`);
 				blocks.push(parts.join("\n\n"));

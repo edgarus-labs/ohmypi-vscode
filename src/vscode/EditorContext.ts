@@ -47,7 +47,10 @@ function gatherEditorContext(logger: Logger): EditorContextData {
 			column: selection.active.character + 1,
 		};
 		if (!selection.isEmpty) {
-			const range = new vscode.Range(selection.start, document.positionAt(Math.min(document.offsetAt(selection.end), document.offsetAt(selection.start) + MAX_SELECTION_CHARS + 1)));
+			const range = new vscode.Range(
+				selection.start,
+				document.positionAt(Math.min(document.offsetAt(selection.end), document.offsetAt(selection.start) + MAX_SELECTION_CHARS + 1)),
+			);
 			data.selection = { text: document.getText(range), startLine: selection.start.line + 1, endLine: selection.end.line + 1 };
 		}
 	}

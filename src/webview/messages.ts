@@ -30,14 +30,25 @@ function renderUser(item: UserItem, ctx: RenderContext): HTMLElement {
 			? collapsible(ctx, `${item.id}:expanded`, ["expanded command"], () => h("pre", { class: "out" }, item.expandedText ?? ""), false, "aside")
 			: null,
 		...parts.pasted.map((pasted, index) =>
-			collapsible(ctx, `${item.id}:pasted:${index}`, [`${pasted.name} · ${lineCount(pasted.text)}`], () => h("pre", { class: "out" }, pasted.text), false, "aside"),
+			collapsible(
+				ctx,
+				`${item.id}:pasted:${index}`,
+				[`${pasted.name} · ${lineCount(pasted.text)}`],
+				() => h("pre", { class: "out" }, pasted.text),
+				false,
+				"aside",
+			),
 		),
 		fileChips.length > 0 ? h("div", { class: "chips" }, ...fileChips) : null,
 		parts.editorContext
 			? collapsible(ctx, `${item.id}:ctx`, ["editor context"], () => h("pre", { class: "out" }, parts.editorContext ?? ""), false, "aside")
 			: null,
 		item.imageCount ? h("div", { class: "meta" }, `+${item.imageCount} image${item.imageCount === 1 ? "" : "s"}`) : null,
-		h("div", { class: "msg-actions" }, copyButton(() => item.text, "Copy message")),
+		h(
+			"div",
+			{ class: "msg-actions" },
+			copyButton(() => item.text, "Copy message"),
+		),
 	);
 }
 
@@ -76,7 +87,13 @@ function renderAssistant(item: AssistantItem, ctx: RenderContext): HTMLElement {
 		meta.length > 0
 			? h("div", { class: "meta msg-meta", ...(usage.length > 0 ? { title: usage.join(" · ") } : {}), attrs: { "data-part": "meta" } }, meta.join(" · "))
 			: null,
-		!item.streaming && item.text ? h("div", { class: "msg-actions" }, copyButton(() => item.text, "Copy reply")) : null,
+		!item.streaming && item.text
+			? h(
+					"div",
+					{ class: "msg-actions" },
+					copyButton(() => item.text, "Copy reply"),
+				)
+			: null,
 	);
 }
 

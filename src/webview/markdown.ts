@@ -177,7 +177,9 @@ export function renderMarkdown(text: string): string {
 		const attr = lang ? ` data-lang="${lang}"` : "";
 		const copy = '<button class="code-copy link" type="button" title="Copy code" aria-label="Copy code">Copy</button>';
 		const body = highlightedCode(unescapeHtml((code ?? []).join("\n")), lang);
-		out.push(`<div class="md-code"><div class="code-head"><span class="code-lang">${lang}</span>${copy}</div><pre class="code"${attr}><code>${body}</code></pre></div>`);
+		out.push(
+			`<div class="md-code"><div class="code-head"><span class="code-lang">${lang}</span>${copy}</div><pre class="code"${attr}><code>${body}</code></pre></div>`,
+		);
 		code = undefined;
 	};
 	for (let index = 0; index < lines.length; index++) {

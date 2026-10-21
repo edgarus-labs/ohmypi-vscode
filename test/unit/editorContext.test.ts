@@ -75,7 +75,9 @@ describe("editorContextBlock", () => {
 	] as const) {
 		it(`leaves out the active editor and its selection and diagnostics when it is ${where}`, () => {
 			window.activeTextEditor = editor(uri, "TOKEN=abc", 0, 9);
-			stub.on("languages.getDiagnostics", () => [[uri, [{ severity: DiagnosticSeverity.Error, range: new Range(new Position(0, 0), new Position(0, 1)), message: "leak" }]]]);
+			stub.on("languages.getDiagnostics", () => [
+				[uri, [{ severity: DiagnosticSeverity.Error, range: new Range(new Position(0, 0), new Position(0, 1)), message: "leak" }]],
+			]);
 			const block = editorContextBlock(memoryLogger());
 			assert.ok(!block.includes("active file"), block);
 			assert.ok(!block.includes("TOKEN"), block);

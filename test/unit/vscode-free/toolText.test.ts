@@ -57,7 +57,10 @@ describe("stripFences", () => {
 
 describe("prettyJson", () => {
 	it("indents one line of JSON, copying strings and numbers verbatim", () => {
-		assert.equal(prettyJson(' {"a":1.50,"b":[true,{}],"c":"x, \\"y\\": [z]"} '), '{\n  "a": 1.50,\n  "b": [\n    true,\n    {}\n  ],\n  "c": "x, \\"y\\": [z]"\n}');
+		assert.equal(
+			prettyJson(' {"a":1.50,"b":[true,{}],"c":"x, \\"y\\": [z]"} '),
+			'{\n  "a": 1.50,\n  "b": [\n    true,\n    {}\n  ],\n  "c": "x, \\"y\\": [z]"\n}',
+		);
 	});
 
 	it("leaves invalid, multi-line and scalar JSON alone", () => {

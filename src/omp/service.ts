@@ -290,11 +290,7 @@ export class OmpService implements OmpServiceApi {
 	}
 
 	async switchSession(sessionFile: string): Promise<void> {
-		const { cancelled } = await this.#request(
-			"switch_session",
-			{ sessionPath: sessionFile },
-			{ timeoutMs: SESSION_COMMAND_TIMEOUT_MS },
-		);
+		const { cancelled } = await this.#request("switch_session", { sessionPath: sessionFile }, { timeoutMs: SESSION_COMMAND_TIMEOUT_MS });
 		if (cancelled) throw new Error("Switching sessions was cancelled by an OMP extension");
 		await this.#loader.load(this.#requireClient());
 	}

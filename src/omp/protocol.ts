@@ -107,13 +107,7 @@ export interface OtherMessage {
 	timestamp?: number;
 }
 
-export type AgentMessage =
-	| UserMessage
-	| AssistantMessage
-	| ToolResultMessage
-	| BashExecutionMessage
-	| CompactionSummaryMessage
-	| OtherMessage;
+export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | BashExecutionMessage | CompactionSummaryMessage | OtherMessage;
 
 export type AssistantMessageEvent =
 	| { type: "text_delta" | "thinking_delta" | "toolcall_delta"; contentIndex: number; delta: string }

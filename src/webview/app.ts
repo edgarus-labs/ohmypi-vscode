@@ -170,7 +170,8 @@ export function startWebviewApp(api: VsCodeApi, root: HTMLElement): WebviewApp {
 		state.setHostDefault(message.includeEditorContext);
 		step(() => transcript.reset(message.items));
 		const lostImages = state.takeLostImages();
-		if (lostImages.length > 0) step(() => notice("warning", `The chat reloaded and did not keep these attached images; attach them again: ${lostImages.join(", ")}.`));
+		if (lostImages.length > 0)
+			step(() => notice("warning", `The chat reloaded and did not keep these attached images; attach them again: ${lostImages.join(", ")}.`));
 		const pendingIds = new Set(message.interactions.map(pending => pending.request.id));
 		for (const id of interactions.ids()) if (!pendingIds.has(id)) interactions.remove(id);
 		for (const pending of message.interactions) step(() => interactions.add(pending));

@@ -46,7 +46,9 @@ export function toolResultFiles(details: unknown): ResultFile[] {
 			add(entry.path, entry.oldText);
 			sources.push(entry.sourcePath);
 		}
-		sources.forEach(source => add(source));
+		sources.forEach(source => {
+			add(source);
+		});
 	}
 	add(details.sourcePath);
 	return [...files.values()];
