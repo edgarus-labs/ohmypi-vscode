@@ -21,6 +21,8 @@ class FakeService {
 	readonly restarts: Array<Deferred<void>> = [];
 	stops = 0;
 	disposed = false;
+	/** While set, `stop()` waits for it. */
+	stopGate: Deferred<void> | undefined;
 
 	start(options?: SessionBinding): Promise<void> {
 		const done = deferred<void>();
@@ -38,6 +40,7 @@ class FakeService {
 	async stop(): Promise<void> {
 		this.stops++;
 		this.setConnection({ state: "stopped" });
+		await this.stopGate?.promise;
 	}
 
 	dispose(): void {
@@ -66,6 +69,7 @@ describe("ServiceSupervisor", () => {
 	let unavailable: string[];
 	let consumed: Array<OmpServiceApi | undefined>;
 	let shownLog: number;
+	let lastSession: string | undefined;
 	let supervisor: ServiceSupervisor;
 
 	const contexts = (key: string) =>
@@ -77,12 +81,14 @@ describe("ServiceSupervisor", () => {
 
 	beforeEach(() => {
 		stub.reset();
+		workspace.workspaceFolders = [{ uri: { fsPath: "/work" }, name: "work", index: 0 }];
 		logger = memoryLogger();
 		services = [];
 		createError = undefined;
 		unavailable = [];
 		consumed = [];
 		shownLog = 0;
+		lastSession = undefined;
 		const consumer: ServiceConsumer = { setService: service => consumed.push(service) };
 		supervisor = new ServiceSupervisor({
 			create: () => {
@@ -93,7 +99,10 @@ describe("ServiceSupervisor", () => {
 			},
 			consumers: [consumer],
 			showUnavailable: message => unavailable.push(message),
-			resumeOptions: preferred => (preferred ? { resumeSessionFile: preferred } : undefined),
+			resumeOptions: preferred => {
+				const file = preferred ?? lastSession;
+				return file ? { resumeSessionFile: file } : undefined;
+			},
 			onSession: () => {},
 			logger,
 			output: { show: () => shownLog++ },
@@ -123,6 +132,51 @@ describe("ServiceSupervisor", () => {
 		supervisor.initialize();
 		assert.equal(services[0].starts.length, 0);
 		assert.equal(supervisor.needsStart(), true);
+	});
+
+	it("resumes the last session on activation by default", () => {
+		lastSession = "/sessions/last.jsonl";
+		supervisor.initialize();
+		assert.deepEqual(services[0].starts[0].options, { resumeSessionFile: "/sessions/last.jsonl" });
+	});
+
+	it("starts a new session on activation in newSession startup mode", () => {
+		stub.config.set("omp.startup", "newSession");
+		lastSession = "/sessions/last.jsonl";
+		supervisor.initialize();
+		assert.deepEqual(services[0].starts[0].options, { newSession: true });
+	});
+
+	it("does not start OMP on activation without a workspace folder", () => {
+		workspace.workspaceFolders = undefined;
+		supervisor.initialize();
+		assert.equal(services[0].starts.length, 0);
+		assert.equal(supervisor.needsStart(), true);
+		assert.match(logger.text("info"), /No workspace folder is open/);
+	});
+
+	it("resumes the current session when a command starts OMP after it failed", async () => {
+		const service = await ready();
+		service.setSession({ sessionFile: "/sessions/current.jsonl" });
+		service.setConnection({ state: "failed", detail: "OMP exited with code 1; gave up after 3 restarts" });
+		const ensured = supervisor.ensureService();
+		assert.deepEqual(service.starts[1]?.options, { resumeSessionFile: "/sessions/current.jsonl" });
+		service.setConnection({ state: "ready" });
+		service.starts[1].done.resolve();
+		assert.equal(await ensured, service.api);
+	});
+
+	it("waits for an automatic restart before handing out the service", async () => {
+		const service = await ready();
+		service.setConnection({ state: "restarting", detail: "OMP exited with code 1; restart 1/3 in 10 ms" });
+		let ensured: OmpServiceApi | undefined;
+		const ensuring = supervisor.ensureService().then(result => (ensured = result));
+		await tick();
+		assert.equal(ensured, undefined, "still restarting");
+		service.setConnection({ state: "ready" });
+		await ensuring;
+		assert.equal(ensured, service.api);
+		assert.equal(service.starts.length, 1, "the automatic restart is not doubled by a start");
 	});
 
 	it("reports a failed start once, with Show Log", async () => {
@@ -230,6 +284,42 @@ describe("ServiceSupervisor", () => {
 		assert.equal(service.stops, 1);
 		assert.equal(services.length, 2);
 		assert.deepEqual(services[1].starts[0].options, { resumeSessionFile: "/sessions/a.jsonl" });
+	});
+
+	it("waits for a recreation in progress instead of reporting OMP missing", async () => {
+		const service = await ready();
+		service.stopGate = deferred();
+		const recreated = supervisor.recreate();
+		const ensured = supervisor.ensureService();
+		service.stopGate.resolve();
+		await recreated;
+		const replacement = services[1];
+		replacement.setConnection({ state: "ready" });
+		replacement.starts[0].done.resolve();
+		assert.equal(await ensured, replacement.api);
+	});
+
+	it("starts no new service once disposed while a recreation stops the old one", async () => {
+		const service = await ready();
+		service.stopGate = deferred();
+		const recreated = supervisor.recreate();
+		await tick();
+		supervisor.dispose();
+		service.stopGate.resolve();
+		await recreated;
+		assert.equal(services.length, 1);
+	});
+
+	it("starts no new service after shutdown while a recreation stops the old one", async () => {
+		const service = await ready();
+		service.stopGate = deferred();
+		const recreated = supervisor.recreate();
+		await tick();
+		const shutDown = supervisor.shutdown();
+		service.stopGate.resolve();
+		await Promise.all([recreated, shutDown]);
+		assert.equal(services.length, 1);
+		assert.equal(supervisor.service, undefined);
 	});
 
 	it("does not run OMP in Restricted Mode and starts it once the workspace is trusted", async () => {

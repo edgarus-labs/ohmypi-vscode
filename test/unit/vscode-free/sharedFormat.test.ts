@@ -8,10 +8,24 @@ describe("shared formatters", () => {
 		assert.equal(formatCost(3.456), "$3.46");
 	});
 
+	it("switches to cents for a cost that rounds to a dollar", () => {
+		assert.equal(formatCost(0.99996), "$1.00");
+		assert.equal(formatCost(0.99994), "$0.9999");
+	});
+
 	it("formats durations", () => {
 		assert.equal(formatDuration(850), "850ms");
 		assert.equal(formatDuration(12_300), "12.3s");
 		assert.equal(formatDuration(125_000), "2m 5s");
+	});
+
+	it("rounds a duration before choosing its unit, uses hours past an hour and clamps negative ones", () => {
+		assert.equal(formatDuration(999.6), "1.0s");
+		assert.equal(formatDuration(59_940), "59.9s");
+		assert.equal(formatDuration(59_960), "1m 0s");
+		assert.equal(formatDuration(3_599_600), "1h 0m");
+		assert.equal(formatDuration(4_503_000), "1h 15m");
+		assert.equal(formatDuration(-5), "0ms");
 	});
 
 	it("formats elapsed time", () => {
@@ -20,6 +34,13 @@ describe("shared formatters", () => {
 		assert.equal(elapsedText(65_000), "1m 05s");
 		assert.equal(elapsedText(3_725_000), "1h 02m");
 		assert.equal(elapsedText(-5), "0s");
+	});
+
+	it("switches elapsed time units exactly at the minute and the hour", () => {
+		assert.equal(elapsedText(59_999), "59s");
+		assert.equal(elapsedText(60_000), "1m 00s");
+		assert.equal(elapsedText(3_599_000), "59m 59s");
+		assert.equal(elapsedText(3_600_000), "1h 00m");
 	});
 
 	it("formats token counts compactly", () => {
@@ -58,6 +79,11 @@ describe("shared formatters", () => {
 	it("fences text with more backticks than it contains", () => {
 		assert.equal(fenceFor("plain"), "```");
 		assert.equal(fenceFor("a ```` b"), "`````");
+	});
+
+	it("fences text with any number of backtick runs", () => {
+		assert.equal(fenceFor("`a".repeat(200_000)), "```");
+		assert.equal(fenceFor(`${"`a".repeat(200_000)}\`\`\`\``), "`````");
 	});
 
 	it("formats compact relative times with unit boundaries", () => {

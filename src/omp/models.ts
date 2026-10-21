@@ -14,9 +14,14 @@ export function toModelView(model: ModelInfo): ModelView {
 	if (model.api) view.api = model.api;
 	if (typeof model.contextWindow === "number") view.contextWindow = model.contextWindow;
 	if (typeof model.maxTokens === "number") view.maxTokens = model.maxTokens;
-	if (model.cost) {
-		const { input, output, cacheRead, cacheWrite } = model.cost;
-		view.cost = { input, output, cacheRead, cacheWrite };
+	const cost = model.cost;
+	if (typeof cost?.input === "number" && typeof cost.output === "number") {
+		view.cost = {
+			input: cost.input,
+			output: cost.output,
+			cacheRead: typeof cost.cacheRead === "number" ? cost.cacheRead : 0,
+			cacheWrite: typeof cost.cacheWrite === "number" ? cost.cacheWrite : 0,
+		};
 	}
 	const identity: NonNullable<ModelView["identity"]> = {};
 	for (const key of ["class", "family", "revision"] as const) {

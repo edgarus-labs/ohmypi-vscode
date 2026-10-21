@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import type { Disposable, Logger, OmpServiceApi, ToolExecutionEvent, TranscriptItem } from "../omp/api";
 import { toolArgPaths, toolResultFiles } from "../shared/toolFiles";
 import { BASELINE_SCHEME, BaselineContentProvider, baselineUri, EMPTY_QUERY } from "./BaselineContentProvider";
-import { ChangeModel, readSnapshot, type TrackedChange } from "./changeModel";
+import { ChangeModel, type ChangeScope, type ReadSnapshot, readSnapshot, type TrackedChange } from "./changeModel";
 import { resolveToolPath } from "./changePaths";
 import { changeRowDescription, changesSummary } from "./changeRows";
 import { confirmToolFile, workspaceRoots } from "./workspaceFiles";
@@ -22,6 +22,8 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 	private readonly baselineEmitter = new vscode.EventEmitter<vscode.Uri>();
 	private readonly summaryEmitter = new vscode.EventEmitter<string>();
 	private lastSummary = "";
+	/** Bumped by `clear`, so tool events received before it are dropped. */
+	private generation = 0;
 
 	readonly onDidChangeTreeData = this.treeEmitter.event;
 	/** Fires with the new {@link summary} when it changes. */
@@ -31,8 +33,11 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 	/** Serves `omp-base:` documents for the diff editor. */
 	readonly contentProvider: BaselineContentProvider;
 
-	constructor(private readonly logger: Logger) {
-		this.model = new ChangeModel(filePath => readSnapshot(filePath, logger), logger);
+	constructor(
+		private readonly logger: Logger,
+		read: ReadSnapshot = filePath => readSnapshot(filePath, logger),
+	) {
+		this.model = new ChangeModel(read, logger);
 		this.contentProvider = new BaselineContentProvider(filePath => this.model.baseline(filePath), this.onDidChangeBaseline);
 		this.treeEmitter.event(() => {
 			const summary = changesSummary(this.model.size);
@@ -58,7 +63,14 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 		this.subscriptions = service
 			? [
 					service.onToolExecution(event => {
-						this.queue = this.queue.then(() => this.handle(event)).catch(error => this.logger.error("Change tracking failed", error));
+						const cwd = service.cwd;
+						if (!cwd) return;
+						const scope: ChangeScope = { cwd, roots: workspaceRoots(cwd) };
+						const generation = this.generation;
+						this.model.readAhead(event, scope);
+						this.queue = this.queue
+							.then(() => (generation === this.generation ? this.handle(event, scope) : undefined))
+							.catch(error => this.logger.error("Change tracking failed", error));
 					}),
 					service.onDidChangeSession(session => {
 						if (session.sessionId === this.sessionId) return;
@@ -75,8 +87,9 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 		return this.queue;
 	}
 
-	/** Forgets all changes and closes their diff editors, whose baselines are gone with them. */
+	/** Forgets all changes, including tool events not yet processed, and closes their diff editors, whose baselines are gone with them. */
 	clear(): void {
+		this.generation++;
 		const staleDiffs = vscode.window.tabGroups.all
 			.flatMap(group => group.tabs)
 			.filter(tab => tab.input instanceof vscode.TabInputTextDiff && tab.input.original.scheme === BASELINE_SCHEME);
@@ -116,7 +129,7 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 			return true;
 		}
 		const withOld = files.find(entry => entry.oldText !== undefined && isWanted(resolveToolPath(entry.path, cwd)));
-		if (!withOld?.oldText) return false;
+		if (withOld?.oldText === undefined) return false;
 		const filePath = resolveToolPath(withOld.path, cwd);
 		if (!filePath) return false;
 		if (!(await confirmToolFile(filePath, cwd))) return true;
@@ -125,10 +138,8 @@ export class ChangeTracker implements vscode.TreeDataProvider<TrackedChange>, vs
 		return true;
 	}
 
-	private async handle(event: ToolExecutionEvent): Promise<void> {
-		const cwd = this.service?.cwd;
-		if (!cwd) return;
-		const { changesChanged, baselinesChanged } = await this.model.apply(event, { cwd, roots: workspaceRoots(cwd) });
+	private async handle(event: ToolExecutionEvent, scope: ChangeScope): Promise<void> {
+		const { changesChanged, baselinesChanged } = await this.model.apply(event, scope);
 		for (const filePath of baselinesChanged) this.baselineEmitter.fire(baselineUri(filePath));
 		if (changesChanged) this.treeEmitter.fire();
 	}

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { ConnectionStatus, Disposable, Logger, OmpServiceApi, SessionBinding, SessionView } from "../omp/api";
 import { isSupersededError } from "../omp/api";
+import { deferred } from "../shared/deferred";
 import { errorMessage } from "../shared/errors";
 import { openOmpSettings } from "./commands";
 
@@ -37,6 +38,8 @@ export class ServiceSupervisor implements vscode.Disposable {
 	private changing: Promise<void> | undefined;
 	private subscriptions: Disposable[] = [];
 	private readonly trustSubscription: vscode.Disposable;
+	/** Set by `shutdown()`/`dispose()`; no service is created afterwards. */
+	private disposed = false;
 
 	constructor(private readonly options: ServiceSupervisorOptions) {
 		void this.setContext("omp.busy", false);
@@ -50,9 +53,13 @@ export class ServiceSupervisor implements vscode.Disposable {
 		return this.current;
 	}
 
-	/** Creates the service and starts it according to `omp.startup`. */
+	/** Creates the service and starts it according to `omp.startup`; without a workspace folder OMP waits for the first command. */
 	initialize(): void {
 		if (!this.createService()) return;
+		if (!vscode.workspace.workspaceFolders?.length) {
+			this.options.logger.info("No workspace folder is open: OMP starts on the first command");
+			return;
+		}
 		const startup = vscode.workspace.getConfiguration("omp").get<string>("startup", "resumeLast");
 		if (startup === "manual") {
 			this.options.logger.info("Startup mode manual: OMP starts on the first command");
@@ -62,6 +69,7 @@ export class ServiceSupervisor implements vscode.Disposable {
 	}
 
 	private createService(): boolean {
+		if (this.disposed) return false;
 		if (!vscode.workspace.isTrusted) {
 			this.options.logger.info(RESTRICTED_MESSAGE);
 			this.options.showUnavailable(RESTRICTED_MESSAGE);
@@ -145,12 +153,23 @@ export class ServiceSupervisor implements vscode.Disposable {
 		return tracked;
 	}
 
-	/** The running service; starts OMP with `options` when it is not running yet. */
+	/**
+	 * The running service. Starts OMP when it is not running, with `options` or else the current (or last)
+	 * session; waits for a restart, recreation or automatic restart in progress.
+	 */
 	async ensureService(options?: SessionBinding): Promise<OmpServiceApi> {
 		for (;;) {
 			const service = this.current;
-			if (!service) throw new Error(vscode.workspace.isTrusted ? NOT_FOUND_MESSAGE : RESTRICTED_MESSAGE);
-			const launch = this.needsStart() ? this.start(options) : this.starting;
+			if (!service) {
+				if (!this.changing) throw new Error(vscode.workspace.isTrusted ? NOT_FOUND_MESSAGE : RESTRICTED_MESSAGE);
+				await this.changing.catch(() => undefined);
+				continue;
+			}
+			if (!this.starting && service.connection.state === "restarting") {
+				await this.restarted(service);
+				continue;
+			}
+			const launch = this.needsStart() ? this.start(options ?? this.options.resumeOptions(service.session.sessionFile)) : this.starting;
 			if (!launch) return service;
 			try {
 				await launch;
@@ -162,6 +181,17 @@ export class ServiceSupervisor implements vscode.Disposable {
 				await this.changing.catch(() => undefined);
 			}
 		}
+	}
+
+	/** Resolves once an automatic restart of `service` is over, whichever way it ended. */
+	private restarted(service: OmpServiceApi): Promise<void> {
+		const done = deferred<void>();
+		const subscription = service.onDidChangeConnection(status => {
+			if (status.state === "restarting") return;
+			subscription.dispose();
+			done.resolve();
+		});
+		return done.promise;
 	}
 
 	/** Restarts OMP; a restart requested while one runs joins it. */
@@ -227,7 +257,14 @@ export class ServiceSupervisor implements vscode.Disposable {
 		}
 	}
 
+	/** Stops OMP for good: a restart or recreation still in progress creates no new service. */
+	shutdown(): Promise<void> {
+		this.disposed = true;
+		return this.stop();
+	}
+
 	dispose(): void {
+		this.disposed = true;
 		const service = this.current;
 		this.current = undefined;
 		this.subscriptions.forEach(subscription => subscription.dispose());

@@ -33,6 +33,14 @@ describe("composePrompt", () => {
 		assert.equal(message, 'what is wrong?\n\n<pasted-text name="Pasted text 1">\nline 1\n<\\/pasted-text>\nline 3\n</pasted-text>');
 	});
 
+	it("neutralizes closing tags in any letter case or with trailing space inside pasted text and restores them on display", () => {
+		const pasted = "a\n</PASTED-TEXT>\nb\n</Pasted-Text >\nc\n<\\/pasted-text>\nd";
+		const { message } = composePrompt({ text: "look", attachments: [{ id: "1", kind: "text", text: pasted, label: "Pasted text 1" }], cwd });
+		const body = message.slice(message.indexOf("\n", message.indexOf("<pasted-text")) + 1, message.lastIndexOf("\n</pasted-text>"));
+		assert.doesNotMatch(body, /<\/pasted-text\s*>/i);
+		assert.deepEqual(splitUserMessage(message).pasted, [{ name: "Pasted text 1", text: pasted }]);
+	});
+
 	it("passes images separately and allows sending attachments without text", () => {
 		const result = composePrompt({
 			text: "",
@@ -93,6 +101,28 @@ describe("splitUserMessage", () => {
 	it("keeps backslashes of Windows paths in quoted mentions", () => {
 		assert.deepEqual(splitUserMessage('go\n\nAttached: @"C:\\my docs\\a.md"').files, ["C:\\my docs\\a.md"]);
 	});
+
+	it("parses a long run of mentions without backtracking", () => {
+		for (const run of ["@a".repeat(40), '@"'.repeat(40), '@"x\\" '.repeat(40)]) {
+			const message = `look\n\nAttached: ${run}\nmore`;
+			const started = Date.now();
+			const parts = splitUserMessage(message);
+			assert.ok(Date.now() - started < 200, `took ${Date.now() - started} ms`);
+			assert.deepEqual(parts.files, []);
+		}
+	});
+
+	it("reads mentions only from a last line made of space-separated mentions", () => {
+		assert.deepEqual(splitUserMessage("go\n\nAttached: @a.ts @b@2x.png").files, ["a.ts", "b@2x.png"]);
+		assert.deepEqual(splitUserMessage("go\n\nAttached: @a.ts  @b.ts").files, []);
+	});
+
+	it("keeps an editor context whose selection contains the closing tag", () => {
+		const editorContext = "<editor-context>\nselection:\n```\nconst end = \"</editor-context>\";\nconst escaped = \"<\\/editor-context>\";\n```\n</editor-context>";
+		const { message } = composePrompt({ text: "review", attachments: [], cwd, editorContext });
+		assert.equal(message.split("</editor-context>").length, 2);
+		assert.deepEqual(splitUserMessage(message), { text: "review", editorContext, pasted: [], files: [] });
+	});
 });
 
 describe("classifyPaste", () => {
@@ -112,28 +142,41 @@ describe("admitImages", () => {
 
 	it("accepts images within the per-image, count and total limits", () => {
 		const files = [
-			{ name: "a.png", size: 2 * MB },
-			{ name: "b.png", size: 3 * MB },
+			{ name: "a.png", size: 2 * MB, type: "image/png" },
+			{ name: "b.jpg", size: 3 * MB, type: "image/jpeg" },
 		];
 		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, files), { accepted: files, rejected: [] });
 	});
 
+	it("rejects image formats models do not read", () => {
+		const files = [
+			{ name: "a.gif", size: 1, type: "image/gif" },
+			{ name: "b.webp", size: 1, type: "image/webp" },
+			{ name: "c.svg", size: 1, type: "image/svg+xml" },
+			{ name: "d.tiff", size: 1, type: "image/tiff" },
+		];
+		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, files), {
+			accepted: files.slice(0, 2),
+			rejected: ["Image c.svg was not attached: only PNG, JPEG, GIF and WebP images are supported.", "Image d.tiff was not attached: only PNG, JPEG, GIF and WebP images are supported."],
+		});
+	});
+
 	it("rejects an image larger than 10 MB", () => {
-		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, [{ name: "", size: 11 * MB }]), {
+		assert.deepEqual(admitImages({ count: 0, bytes: 0 }, [{ name: "", size: 11 * MB, type: "image/png" }]), {
 			accepted: [],
 			rejected: ["Image from clipboard was not attached: larger than 10 MB."],
 		});
 	});
 
 	it("counts images already attached or being read against the limits", () => {
-		assert.deepEqual(admitImages({ count: MAX_IMAGES, bytes: MB }, [{ name: "x.png", size: 1 }]).rejected, [
+		assert.deepEqual(admitImages({ count: MAX_IMAGES, bytes: MB }, [{ name: "x.png", size: 1, type: "image/png" }]).rejected, [
 			`Image x.png was not attached: at most ${MAX_IMAGES} images per prompt.`,
 		]);
 		const result = admitImages({ count: 1, bytes: 15 * MB }, [
-			{ name: "y.png", size: 4 * MB },
-			{ name: "z.png", size: 2 * MB },
+			{ name: "y.png", size: 4 * MB, type: "image/png" },
+			{ name: "z.png", size: 2 * MB, type: "image/png" },
 		]);
-		assert.deepEqual(result.accepted, [{ name: "y.png", size: 4 * MB }]);
+		assert.deepEqual(result.accepted, [{ name: "y.png", size: 4 * MB, type: "image/png" }]);
 		assert.deepEqual(result.rejected, ["Image z.png was not attached: images in one prompt may total at most 20 MB."]);
 	});
 });

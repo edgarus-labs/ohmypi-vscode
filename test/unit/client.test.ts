@@ -1,8 +1,25 @@
 import * as assert from "node:assert/strict";
-import { describeClose, OmpRequestError, OmpRpcClient } from "../../src/omp/client";
+import { describeClose, OmpRequestError, OmpRpcClient, type OmpRpcClientOptions, type OmpTransport } from "../../src/omp/client";
 import type { SessionEvent, UnknownFrame } from "../../src/omp/protocol";
 import { isRecord } from "../../src/shared/guards";
 import { MemoryTransport, memoryLogger, READY_V2, tick } from "./helpers";
+
+const clients: OmpRpcClient[] = [];
+
+/** A client the surrounding suite disposes after each test, so no readiness or request timer outlives it. */
+function newClient(transport: OmpTransport, options: OmpRpcClientOptions): OmpRpcClient {
+	const client = new OmpRpcClient(transport, options);
+	clients.push(client);
+	return client;
+}
+
+function disposeClients(): void {
+	for (const client of clients.splice(0)) client.dispose();
+}
+
+function activeTimers(): number {
+	return process.getActiveResourcesInfo().filter(resource => resource === "Timeout").length;
+}
 
 function negotiating(extra?: (frame: Record<string, unknown>, t: MemoryTransport) => void) {
 	return new MemoryTransport((frame, t) => {
@@ -12,9 +29,11 @@ function negotiating(extra?: (frame: Record<string, unknown>, t: MemoryTransport
 }
 
 describe("OmpRpcClient", () => {
+	afterEach(disposeClients);
+
 	it("waits for ready and negotiates protocol v2 when advertised", async () => {
 		const transport = negotiating();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const started = client.start();
 		transport.emit(READY_V2);
 		await started;
@@ -24,7 +43,7 @@ describe("OmpRpcClient", () => {
 
 	it("stays on v1 without negotiating when the server does not advertise v2", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		transport.emit({ type: "ready" });
 		await client.start();
 		assert.equal(client.protocolVersion, 1);
@@ -32,13 +51,13 @@ describe("OmpRpcClient", () => {
 	});
 
 	it("rejects start when no ready frame arrives in time", async () => {
-		const client = new OmpRpcClient(new MemoryTransport(), { logger: memoryLogger(), readyTimeoutMs: 20 });
+		const client = newClient(new MemoryTransport(), { logger: memoryLogger(), readyTimeoutMs: 20 });
 		await assert.rejects(client.start(), /ready/);
 	});
 
 	it("rejects start when the process closes before ready", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger(), readyTimeoutMs: 5000 });
+		const client = newClient(transport, { logger: memoryLogger(), readyTimeoutMs: 5000 });
 		const started = client.start();
 		transport.close(1);
 		await assert.rejects(started, /exited/);
@@ -46,7 +65,7 @@ describe("OmpRpcClient", () => {
 
 	it("correlates out-of-order responses by id", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		transport.emit({ type: "ready" });
 		await client.start();
 		const state = client.request("get_state");
@@ -63,7 +82,7 @@ describe("OmpRpcClient", () => {
 		const transport = new MemoryTransport((frame, t) =>
 			t.emit({ type: "response", id: frame.id, command: frame.type, success: false, error: "busy", code: "session_busy" }),
 		);
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const error = await client.request("get_messages_page", {}).catch(e => e);
 		assert.ok(error instanceof OmpRequestError);
 		assert.equal(error.code, "session_busy");
@@ -74,7 +93,7 @@ describe("OmpRpcClient", () => {
 	it("times out requests and ignores late responses", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		const error = await client.request("get_state", undefined, { timeoutMs: 10 }).catch(e => e);
 		assert.ok(error instanceof OmpRequestError);
 		assert.equal(error.code, "timeout");
@@ -84,7 +103,7 @@ describe("OmpRpcClient", () => {
 
 	it("rejects pending requests when the transport closes", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const pending = client.request("get_state").catch(e => e);
 		transport.close(3);
 		const error = await pending;
@@ -97,14 +116,14 @@ describe("OmpRpcClient", () => {
 	it("rejects with write_failed when the transport cannot write", async () => {
 		const transport = new MemoryTransport();
 		transport.failWrites = true;
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const error = await client.request("get_state").catch(e => e);
 		assert.equal(error.code, "write_failed");
 	});
 
 	it("rejects only the request whose write the transport reports as failed afterwards", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		transport.failWritesLater = new Error("write EPIPE");
 		const failed = client.request("get_state", undefined, { timeoutMs: 0 }).catch(e => e);
 		transport.failWritesLater = undefined;
@@ -120,7 +139,7 @@ describe("OmpRpcClient", () => {
 	it("logs a UI response the transport fails to deliver afterwards", async () => {
 		const transport = new MemoryTransport();
 		const logger = memoryLogger();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.failWritesLater = new Error("write EPIPE");
 		client.sendUiResponse({ type: "extension_ui_response", id: "u1", confirmed: true });
 		await tick();
@@ -130,7 +149,7 @@ describe("OmpRpcClient", () => {
 	it("sends an outbound frame above the negotiated frame limit as one line and warns about it", async () => {
 		const transport = negotiating();
 		const logger = memoryLogger();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ ...READY_V2, maxFrameBytes: 256 });
 		await client.start();
 		void client.request("prompt", { message: "short" }, { timeoutMs: 0 }).catch(() => undefined);
@@ -144,7 +163,7 @@ describe("OmpRpcClient", () => {
 	it("drops inbound lines above the negotiated frame limit", async () => {
 		const transport = negotiating();
 		const logger = memoryLogger();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ ...READY_V2, maxFrameBytes: 256 });
 		await client.start();
 		const output: string[] = [];
@@ -158,7 +177,7 @@ describe("OmpRpcClient", () => {
 	it("accepts inbound lines up to a negotiated frame limit above the default", async () => {
 		const transport = negotiating();
 		const logger = memoryLogger();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ ...READY_V2, maxFrameBytes: 12 * 1024 * 1024 });
 		await client.start();
 		const output: string[] = [];
@@ -171,7 +190,7 @@ describe("OmpRpcClient", () => {
 
 	it("dispatches typed events by frame category", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const seen: string[] = [];
 		client.onSessionEvent((e: SessionEvent) => seen.push(`session:${e.type}`));
 		client.onPromptResult(e => seen.push(`prompt_result:${e.id}`));
@@ -206,7 +225,7 @@ describe("OmpRpcClient", () => {
 	it("dispatches available_commands_update frames to onAvailableCommands", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		const seen: string[][] = [];
 		const unknown: UnknownFrame[] = [];
 		client.onAvailableCommands(frame => seen.push(frame.commands.map(c => c.name)));
@@ -220,7 +239,7 @@ describe("OmpRpcClient", () => {
 	it("tolerates unknown frames and malformed lines without throwing", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		const unknown: UnknownFrame[] = [];
 		client.onUnknownFrame(f => unknown.push(f));
 		transport.emit({ type: "brand_new_frame", x: 1 });
@@ -229,12 +248,16 @@ describe("OmpRpcClient", () => {
 		transport.emit({ noType: true });
 		assert.deepEqual(unknown, [{ type: "brand_new_frame", x: 1 }]);
 		assert.match(logger.text("debug"), /brand_new_frame/);
-		assert.match(logger.text("warn"), /Malformed/);
+		const warnings = logger.records.filter(r => r.level === "warn").map(r => r.message);
+		assert.equal(warnings.length, 3, warnings.join("\n"));
+		assert.match(warnings[0], /Malformed JSONL line .*\{oops/);
+		assert.match(warnings[1], /frame rejected.*must be a JSON object/);
+		assert.match(warnings[2], /frame without a type ignored: \{"noType":true\}/);
 	});
 
 	it("answers host tool calls and host URI requests with errors", async () => {
 		const transport = new MemoryTransport();
-		new OmpRpcClient(transport, { logger: memoryLogger() });
+		newClient(transport, { logger: memoryLogger() });
 		transport.emit({ type: "host_tool_call", id: "h1", toolCallId: "t", toolName: "x", arguments: {} });
 		transport.emit({ type: "host_uri_request", id: "u1", operation: "read", url: "db://x" });
 		const toolResult = transport.sent("host_tool_result")[0];
@@ -251,14 +274,14 @@ describe("OmpRpcClient", () => {
 	it("logs a warning for responses without an id", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		new OmpRpcClient(transport, { logger });
+		newClient(transport, { logger });
 		transport.emit({ type: "response", command: "parse", success: false, error: "Unexpected token" });
 		assert.match(logger.text("warn"), /Unexpected token/);
 	});
 
 	it("reassembles chunked frames after negotiating v2", async () => {
 		const transport = negotiating();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		transport.emit({ ...READY_V2, maxFrameBytes: 256 });
 		await client.start();
 		const output: string[] = [];
@@ -282,7 +305,7 @@ describe("OmpRpcClient", () => {
 	it("traces abbreviated frames and redacts secret UI responses", async () => {
 		const logger = memoryLogger({ trace: true });
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ type: "command_output", text: "x".repeat(5000) });
 		client.sendUiResponse({ type: "extension_ui_response", id: "u1", value: "hunter2" }, true);
 		client.sendUiResponse({ type: "extension_ui_response", id: "u2", value: "visible" }, false);
@@ -296,7 +319,7 @@ describe("OmpRpcClient", () => {
 	it("does not trace when tracing is disabled", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ type: "agent_start" });
 		client.sendUiResponse({ type: "extension_ui_response", id: "u", confirmed: true });
 		await tick();
@@ -306,7 +329,7 @@ describe("OmpRpcClient", () => {
 	it("follows the logger's trace switch for every frame", async () => {
 		const logger = memoryLogger();
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger });
+		const client = newClient(transport, { logger });
 		transport.emit({ type: "agent_start" });
 		logger.traceEnabled = true;
 		transport.emit({ type: "agent_end" });
@@ -320,9 +343,140 @@ describe("OmpRpcClient", () => {
 		assert.ok(trace.includes("extension_ui_response"), "outbound frames are traced once tracing is on");
 		assert.ok(!trace.includes("turn_start"), "frames after tracing was switched off are not traced");
 	});
+
+	it("rejects a request whose caller-chosen id is still pending and keeps the first one answerable", async () => {
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger: memoryLogger() });
+		const first = client.request("get_state", undefined, { id: "p1", timeoutMs: 0 });
+		const duplicate = client.request("get_state", undefined, { id: "p1", timeoutMs: 0 }).catch(e => e);
+		assert.equal(transport.sent("get_state").length, 1, "the duplicate is never sent");
+		const error = await duplicate;
+		assert.ok(error instanceof OmpRequestError);
+		assert.equal(error.code, "duplicate_id");
+		transport.reply(transport.written[0], { sessionId: "s1" });
+		assert.deepEqual(await first, { sessionId: "s1" });
+	});
+
+	it("fails start when protocol negotiation gets no answer, since OMP may already have switched", async () => {
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger: memoryLogger(), requestTimeoutMs: 20 });
+		const started = client.start();
+		transport.emit(READY_V2);
+		const error = await started.catch(e => e);
+		assert.ok(error instanceof OmpRequestError);
+		assert.equal(error.code, "timeout");
+		assert.equal(error.command, "negotiate_protocol");
+	});
+
+	it("stays on v1 with a warning when OMP refuses protocol v2", async () => {
+		const logger = memoryLogger();
+		const transport = new MemoryTransport((frame, t) =>
+			t.emit({ type: "response", id: frame.id, command: frame.type, success: false, error: "unsupported version" }),
+		);
+		const client = newClient(transport, { logger });
+		const started = client.start();
+		transport.emit(READY_V2);
+		await started;
+		assert.equal(client.protocolVersion, 1);
+		assert.match(logger.text("warn"), /negotiation failed.*unsupported version/);
+	});
+
+	it("fails start when OMP exits during protocol negotiation", async () => {
+		const transport = new MemoryTransport((frame, t) => {
+			if (frame.type === "negotiate_protocol") queueMicrotask(() => t.close(1));
+		});
+		const client = newClient(transport, { logger: memoryLogger() });
+		const started = client.start();
+		transport.emit(READY_V2);
+		const error = await started.catch(e => e);
+		assert.ok(error instanceof OmpRequestError);
+		assert.equal(error.code, "closed");
+	});
+
+	it("waits for ready without a deadline when readyTimeoutMs is 0", async () => {
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger: memoryLogger(), readyTimeoutMs: 0 });
+		const started = client.start();
+		await tick(20);
+		transport.emit({ type: "ready" });
+		await started;
+		assert.equal(client.protocolVersion, 1);
+	});
+
+	it("rejects a pending start and pending requests on dispose and delivers no further events", async () => {
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger: memoryLogger(), readyTimeoutMs: 5000 });
+		const started = client.start();
+		const pending = client.request("get_state", undefined, { timeoutMs: 0 }).catch(e => e);
+		const events: string[] = [];
+		client.onSessionEvent(e => events.push(e.type));
+		await tick();
+		const timers = activeTimers();
+		client.dispose();
+		await assert.rejects(started, /disposed/);
+		assert.equal(activeTimers(), timers - 1, "the readiness timer is cleared");
+		const error = await pending;
+		assert.ok(error instanceof OmpRequestError);
+		assert.equal(error.code, "closed");
+		transport.emit({ type: "agent_start" });
+		assert.deepEqual(events, []);
+	});
+
+	it("clears the request timer when the write fails", async () => {
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger: memoryLogger() });
+		await tick();
+		const timers = activeTimers();
+		transport.failWrites = true;
+		assert.equal((await client.request("get_state", undefined, { timeoutMs: 60_000 }).catch(e => e)).code, "write_failed");
+		transport.failWrites = false;
+		transport.failWritesLater = new Error("write EPIPE");
+		assert.equal((await client.request("get_state", undefined, { timeoutMs: 60_000 }).catch(e => e)).code, "write_failed");
+		assert.equal(activeTimers(), timers);
+	});
+
+	it("logs a refusal of a host tool call or URI request it cannot write and keeps dispatching", async () => {
+		const logger = memoryLogger();
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger });
+		const output: string[] = [];
+		client.onCommandOutput(e => output.push(e.text));
+		transport.failWrites = true;
+		transport.emit({ type: "host_tool_call", id: "h1", toolCallId: "t", toolName: "x", arguments: {} });
+		transport.emit({ type: "host_uri_request", id: "u1", operation: "read", url: "db://x" });
+		transport.emit({ type: "command_output", text: "still here" });
+		assert.match(logger.text("error"), /host_tool_call.*write EPIPE/);
+		assert.match(logger.text("error"), /host_uri_request.*write EPIPE/);
+		assert.deepEqual(output, ["still here"]);
+	});
+
+	it("traces an outbound frame only once the transport accepted it", async () => {
+		const logger = memoryLogger({ trace: true });
+		const transport = new MemoryTransport();
+		const client = newClient(transport, { logger });
+		transport.failWrites = true;
+		await client.request("get_state").catch(() => undefined);
+		assert.throws(() => client.sendUiResponse({ type: "extension_ui_response", id: "u", confirmed: true }), /EPIPE/);
+		assert.equal(logger.text("trace"), "");
+	});
+
+	it("ignores frame limits from a ready frame whose physical limit is not below its reassembly limit", async () => {
+		const transport = negotiating();
+		const logger = memoryLogger();
+		const client = newClient(transport, { logger });
+		transport.emit({ ...READY_V2, maxFrameBytes: 2048, maxReassembledFrameBytes: 1024 });
+		await client.start();
+		const output: string[] = [];
+		client.onCommandOutput(e => output.push(e.text));
+		transport.emit({ type: "command_output", text: "x".repeat(3000) });
+		assert.equal(output[0]?.length, 3000);
+		assert.match(logger.text("warn"), /frame limits.*2048.*1024/);
+	});
 });
 
 describe("describeClose", () => {
+	afterEach(disposeClients);
+
 	it("names a spawn or pipe failure, a signal, or the exit code", () => {
 		assert.equal(describeClose({ code: null, signal: null, error: new Error("spawn omp ENOENT") }), "OMP process failed: spawn omp ENOENT");
 		assert.equal(describeClose({ code: null, signal: "SIGTERM" }), "OMP process exited (signal SIGTERM)");
@@ -339,7 +493,7 @@ describe("describeClose", () => {
 
 	it("keeps stderr out of the errors of requests the close rejected", async () => {
 		const transport = new MemoryTransport();
-		const client = new OmpRpcClient(transport, { logger: memoryLogger() });
+		const client = newClient(transport, { logger: memoryLogger() });
 		const pending = client.request("get_state").catch(e => e);
 		transport.close(1, null, { pid: 42, stderr: "boom" });
 		assert.equal((await pending).message, "OMP process 42 exited (code 1); get_state did not complete");

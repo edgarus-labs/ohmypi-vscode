@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { deferred } from "../shared/deferred";
 import type { Event, Logger } from "./api";
 import type { OmpTransport, TransportClose } from "./client";
@@ -21,11 +22,16 @@ const STDIO_DRAIN_MS = 1000;
 /** Bounds of the stderr tail reported with the close. */
 const STDERR_TAIL_LINES = 20;
 const STDERR_TAIL_CHARS = 4000;
+/** Longest stderr line logged whole; longer output without a newline is logged in pieces of this size. */
+const STDERR_LINE_CHARS = 64 * 1024;
 
 /**
- * One OMP child process (`omp --mode rpc-ui` unless another mode is given). On POSIX it leads its own process
- * group so shutdown and exit cleanup reach every descendant; on Windows the
- * tree is killed with `taskkill /T /F`.
+ * One OMP child process (`omp --mode rpc-ui` unless another mode is given). On
+ * POSIX it leads its own process group, so shutdown and the cleanup after OMP
+ * exits reach every descendant. On Windows shutdown ends the tree with
+ * `taskkill /T /F`, but descendants that outlive an OMP that exited by itself
+ * are not reached: Windows has no group to signal once their parent is gone.
+ * Once the close is reported, no further output is delivered.
  */
 export class OmpProcess implements OmpTransport {
 	readonly #child: ChildProcessWithoutNullStreams;
@@ -37,6 +43,7 @@ export class OmpProcess implements OmpTransport {
 	readonly onClose: Event<TransportClose>;
 	#exited = false;
 	#reported = false;
+	readonly #stderrDecoder = new StringDecoder("utf8");
 	/** Stderr text after the last newline. */
 	#stderrPartial = "";
 	readonly #stderrLines: string[] = [];
@@ -62,7 +69,7 @@ export class OmpProcess implements OmpTransport {
 		this.onClose = this.#close.event;
 
 		child.stdout.on("data", (chunk: Buffer) => this.#data.fire(chunk));
-		child.stderr.on("data", (chunk: Buffer) => this.#stderr(chunk.toString("utf8")));
+		child.stderr.on("data", (chunk: Buffer) => this.#stderr(this.#stderrDecoder.write(chunk)));
 		// A failed write is reported to its writer through the write callback; this event repeats it.
 		child.stdin.on("error", error => this.#logger.debug("OMP stdin error", error));
 		child.stdout.on("error", error => this.#logger.warn("OMP stdout error", error));
@@ -162,8 +169,12 @@ export class OmpProcess implements OmpTransport {
 
 	#stderr(text: string): void {
 		const lines = (this.#stderrPartial + text).split(/\r?\n/);
-		this.#stderrPartial = lines.pop() ?? "";
+		let partial = lines.pop() ?? "";
 		for (const line of lines) this.#stderrLine(line);
+		for (; partial.length > STDERR_LINE_CHARS; partial = partial.slice(STDERR_LINE_CHARS)) {
+			this.#stderrLine(partial.slice(0, STDERR_LINE_CHARS));
+		}
+		this.#stderrPartial = partial;
 	}
 
 	#stderrLine(line: string): void {
@@ -176,6 +187,10 @@ export class OmpProcess implements OmpTransport {
 	#report(close: TransportClose): void {
 		if (this.#reported) return;
 		this.#reported = true;
+		// A descendant that escaped the tree may still hold the pipes; stop reading them.
+		this.#child.stdout.destroy();
+		this.#child.stderr.destroy();
+		this.#stderr(this.#stderrDecoder.end());
 		this.#stderrLine(this.#stderrPartial);
 		this.#stderrPartial = "";
 		const pid = this.#child.pid;
@@ -197,16 +212,14 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals, logger: Log
 		const done = deferred<void>();
 		const command = `taskkill /pid ${pid} /T /F`;
 		const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
-		let stderr = "";
-		killer.stderr.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString("utf8");
-		});
+		const stderr: Buffer[] = [];
+		killer.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
 		killer.on("error", error => {
 			logger.warn(`${command} failed to start`, error);
 			done.resolve();
 		});
 		killer.on("close", code => {
-			if (code !== 0 && code !== null) logger.warn(`${command} exited with code ${code}: ${stderr.trim()}`);
+			if (code !== 0 && code !== null) logger.warn(`${command} exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").trim()}`);
 			done.resolve();
 		});
 		return done.promise;

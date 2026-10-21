@@ -130,6 +130,18 @@ export function useDom(): void {
 				},
 			},
 		};
+		// linkedom's select has no `value` setter: as in browsers, it selects the first option with that value, or none.
+		const selectMembers: Record<"value", PropertyDescriptor> = {
+			value: {
+				get(this: HTMLSelectElement) {
+					return this.querySelector<HTMLOptionElement>("option[selected]")?.value ?? "";
+				},
+				set(this: HTMLSelectElement, value: string) {
+					const match = [...this.options].find(option => option.value === value);
+					for (const option of this.options) option.toggleAttribute("selected", option === match);
+				},
+			},
+		};
 		const install = (prototype: object, members: Record<string, PropertyDescriptor>) => {
 			for (const [name, descriptor] of Object.entries(members)) {
 				savedMembers.push({ prototype, name, descriptor: Object.getOwnPropertyDescriptor(prototype, name) });
@@ -138,6 +150,7 @@ export function useDom(): void {
 		};
 		install(window.HTMLElement.prototype, elementMembers);
 		install(window.HTMLTextAreaElement.prototype, textareaMembers);
+		install(window.HTMLSelectElement.prototype, selectMembers);
 		focused.length = 0;
 		scrolledIntoView.length = 0;
 		copied.length = 0;

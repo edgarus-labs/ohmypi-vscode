@@ -49,6 +49,24 @@ describe("webview session chrome", () => {
 		input().dispatchEvent(event("input"));
 	};
 
+	it("selects no effort when the session reports none or one the model does not offer", () => {
+		const selected = () => [...(root.querySelector("select.thinking-select") as HTMLSelectElement).options].filter(option => option.selected).map(option => option.value);
+		app.handle(reset({ session: session({ availableThinkingLevels: ["auto", "low", "high"], thinkingLevel: "high" }) }));
+		assert.deepEqual(selected(), ["high"]);
+		app.handle({ type: "session", session: session({ availableThinkingLevels: ["low", "high"], thinkingSelector: "auto" }) });
+		assert.deepEqual(selected(), []);
+		app.handle({ type: "session", session: session({ availableThinkingLevels: ["low", "high"], thinkingLevel: "low" }) });
+		assert.deepEqual(selected(), ["low"]);
+		app.handle({ type: "session", session: session({ availableThinkingLevels: ["low", "high"] }) });
+		assert.deepEqual(selected(), []);
+		assert.equal(root.querySelector(".item.notice"), null);
+	});
+
+	it("names the state in the indicator's tooltip, which stays when a narrow panel hides the word", () => {
+		app.handle(reset({ connection: { state: "starting" } }));
+		assert.equal(root.querySelector(".header .state")?.getAttribute("title"), "starting · connection: starting");
+	});
+
 	describe("composer keyboard", () => {
 		it("stops the turn on Escape only while the session is not idle", () => {
 			app.handle(reset());

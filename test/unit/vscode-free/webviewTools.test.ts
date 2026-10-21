@@ -181,6 +181,15 @@ describe("tool rows", () => {
 			assert.equal(el.querySelectorAll(".diff-line").length, 4);
 		});
 
+		it("heads each file of a multi-file diff and keeps a removed `--` line removed", () => {
+			const details = { perFileResults: [{ path: "a.sql", diff: "--- old comment\n+-- new comment" }, { path: "b.sql", diff: "-x\n+y" }] };
+			const el = mount(tool({ name: "edit", args: {}, result: { text: "ok", isError: false, details } }), ctx);
+			assert.deepEqual(
+				[...el.querySelectorAll(".diff-line")].map(line => `${line.className.replace("diff-line d-", "")} ${line.textContent}`),
+				["meta --- a.sql", "meta +++ a.sql", "del --- old comment", "add +-- new comment", "meta --- b.sql", "meta +++ b.sql", "del -x", "add +y"],
+			);
+		});
+
 		it("posts the file of a per-file Diff link", () => {
 			const el = mount(tool({ name: "edit", args: { edits: [{ path: "src/a.ts" }, { path: "src/b.ts" }] }, result: { text: "ok", isError: false } }), {
 				...ctx,

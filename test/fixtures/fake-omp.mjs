@@ -4,8 +4,11 @@
 //   crash (exit 3 mid-turn), slow (streams until aborted), approve (confirm), input, editor,
 //   ask (ask dialog, or select when ask dialogs are off), subagent, background (settles later),
 //   present (notify/setStatus/open_url/set_editor_text requests, notice/compaction/retry events,
-//   session_info_update, config_update, tool_stream_update), `tool <absolute path>` (read + edit),
-//   `racyedit <absolute path>` (edits before the start event); anything else streams an echo.
+//   session_info_update, config_update, streamed tool output), `tool <absolute path>` (read + edit),
+//   `racyedit <absolute path>` (edits before the start event; both paths run to the end of the line),
+//   bigframe (an assistant message above the 1 MiB frame limit, sent as rpc_chunk frames once
+//   protocol v2 is negotiated); anything else streams an echo. A scenario that throws ends the turn
+//   with an error prompt_result.
 // Slash commands: COMMANDS is sent in `available_commands_update` right after `ready` and answers
 //   `get_available_commands` (builtins with aliases/hint/subcommands, one `skill:` command).
 // Flags: --no-session (no session file).
@@ -13,7 +16,8 @@
 //      FAKE_OMP_THINKING=auto (start with the auto effort selector),
 //      FAKE_OMP_NO_ASK_DIALOG=1 (set_ask_dialog fails), FAKE_OMP_CANCEL_SWITCH=1 (switch_session is vetoed),
 //      FAKE_OMP_EXIT_IF_EXISTS=<file> (exit 4 before `ready` while that file exists),
-//      FAKE_OMP_IGNORE_EOF=1, FAKE_OMP_IGNORE_SIGTERM=1, FAKE_OMP_SPAWN_CHILD=1 (shutdown tests).
+//      FAKE_OMP_IGNORE_EOF=1, FAKE_OMP_IGNORE_SIGTERM=1, FAKE_OMP_SPAWN_CHILD=1 (shutdown tests; the child
+//      exits 5 s after fake-omp is gone, later than any test waits for the host to clean it up).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -101,8 +105,24 @@ const state = {
 let counter = 0;
 const nextId = prefix => `${prefix}-${++counter}`;
 
+/** OMP's physical frame limit (advertised in `ready`) and the payload size it splits larger frames into. */
+const MAX_FRAME_BYTES = 1024 * 1024;
+const CHUNK_PAYLOAD_BYTES = 256 * 1024;
+
+/** Writes one frame; under protocol v2 a frame above the frame limit goes out as `rpc_chunk` frames, as OMP does. */
 function send(frame) {
-	process.stdout.write(`${JSON.stringify(frame)}\n`);
+	const json = JSON.stringify(frame);
+	if (state.protocolVersion !== 2 || Buffer.byteLength(json) + 1 <= MAX_FRAME_BYTES) {
+		process.stdout.write(`${json}\n`);
+		return;
+	}
+	const bytes = Buffer.from(json);
+	const count = Math.ceil(bytes.length / CHUNK_PAYLOAD_BYTES);
+	const chunkId = randomUUID();
+	for (let index = 0; index < count; index++) {
+		const data = bytes.subarray(index * CHUNK_PAYLOAD_BYTES, (index + 1) * CHUNK_PAYLOAD_BYTES).toString("base64");
+		process.stdout.write(`${JSON.stringify({ type: "rpc_chunk", chunkId, index, count, byteLength: bytes.length, data })}\n`);
+	}
 }
 
 function respond(command, id, data) {
@@ -247,10 +267,21 @@ async function scenarioHostTool(text, run) {
 	await streamAssistant(`Host tool ${result.isError ? "error" : "ok"}: ${output}`, run);
 }
 
-/** `executeFirst` changes the file before the start event, as when a host receives events late. */
-async function runTool(run, name, args, execute, { executeFirst = false } = {}) {
+/**
+ * Sends an assistant message calling tool `name` (after an optional `intro` text block), then runs the tool
+ * under the same tool call id, as OMP does. `executeFirst` changes the file before any of these frames,
+ * as when a host receives events late.
+ */
+async function runTool(run, name, args, execute, { executeFirst = false, intro } = {}) {
 	const toolCallId = nextId("call");
 	const early = executeFirst ? execute() : undefined;
+	const call = assistantMessage([...(intro ? [{ type: "text", text: intro }] : []), { type: "toolCall", id: toolCallId, name, arguments: args }], {
+		stopReason: "toolUse",
+	});
+	const messageId = nextId("msg");
+	send({ type: "message_start", messageId, message: assistantMessage([]) });
+	send({ type: "message_end", messageId, message: call });
+	persist(call);
 	send({ type: "tool_execution_start", toolCallId, toolName: name, args });
 	send({
 		type: "tool_execution_update",
@@ -273,21 +304,24 @@ async function runTool(run, name, args, execute, { executeFirst = false } = {}) 
 	});
 }
 
+/** The text after `keyword` up to the end of its line, so a path may contain spaces. */
+function argumentAfter(keyword, text) {
+	return new RegExp(`\\b${keyword}[ \\t]+([^\\r\\n]+)`).exec(text)?.[1].trim();
+}
+
 async function scenarioTool(text, run) {
-	const target = /tool\s+(\S+)/.exec(text)?.[1];
+	const target = argumentAfter("tool", text);
 	if (!target) return streamAssistant("No tool path given.", run);
-	const call = assistantMessage([
-		{ type: "text", text: "Editing the file." },
-		{ type: "toolCall", id: "planned-read", name: "read", arguments: { path: target } },
-	]);
-	const messageId = nextId("msg");
-	send({ type: "message_start", messageId, message: assistantMessage([]) });
-	send({ type: "message_end", messageId, message: call });
-	persist(call);
-	await runTool(run, "read", { path: target }, () => {
-		const content = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
-		return { content: [{ type: "text", text: content }] };
-	});
+	await runTool(
+		run,
+		"read",
+		{ path: target },
+		() => {
+			const content = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
+			return { content: [{ type: "text", text: content }] };
+		},
+		{ intro: "Editing the file." },
+	);
 	await runTool(run, "edit", { path: target }, () => {
 		const oldText = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
 		const newText = `${oldText}// edited by fake-omp\n`;
@@ -302,7 +336,7 @@ async function scenarioTool(text, run) {
 }
 
 async function scenarioRacyEdit(text, run) {
-	const target = /racyedit\s+(\S+)/.exec(text)?.[1];
+	const target = argumentAfter("racyedit", text);
 	if (!target) return streamAssistant("No edit path given.", run);
 	await runTool(
 		run,
@@ -317,6 +351,14 @@ async function scenarioRacyEdit(text, run) {
 		{ executeFirst: true },
 	);
 	return streamAssistant("Edited before the host saw the start event.", run);
+}
+
+function scenarioBigFrame() {
+	const message = assistantMessage([{ type: "text", text: "big ".repeat(400_000) }]);
+	const messageId = nextId("msg");
+	send({ type: "message_start", messageId, message: assistantMessage([]) });
+	send({ type: "message_end", messageId, message });
+	persist(message);
 }
 
 async function scenarioSubagent(run) {
@@ -368,7 +410,7 @@ async function scenarioPresent(run) {
 	send({ type: "config_update", thinkingLevel: state.thinkingLevel });
 	const toolCallId = nextId("call");
 	send({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } });
-	send({ type: "tool_stream_update", toolCallId, toolName: "bash", update: { content: [{ type: "text", text: "streamed line" }] } });
+	send({ type: "tool_execution_update", toolCallId, toolName: "bash", args: { command: "ls" }, partialResult: { content: [{ type: "text", text: "streamed line" }] } });
 	await sleep(5);
 	send({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "a\nb" }] }, isError: false });
 	return streamAssistant("Presented.", run);
@@ -386,6 +428,17 @@ async function scenarioSlow(run) {
 	const message = assistantMessage([{ type: "text", text: sent }], { stopReason: "aborted" });
 	send({ type: "message_end", messageId, message });
 	persist(message);
+}
+
+/** Runs prompt `id` in the background; a scenario that throws ends the turn with an error result instead of crashing. */
+function startPrompt(id, text) {
+	runPrompt(id, text).catch(error => {
+		process.stderr.write(`fake-omp prompt ${id} failed: ${error?.stack ?? error}\n`);
+		state.running = undefined;
+		send({ type: "agent_end", messages: [], isTerminal: true, yielded: true });
+		send({ type: "prompt_result", id, agentInvoked: true, status: "error", sessionSettled: true, error: { message: String(error?.message ?? error), retryable: false } });
+		send({ type: "session_settled" });
+	});
 }
 
 async function runPrompt(id, text) {
@@ -442,6 +495,8 @@ async function runPrompt(id, text) {
 		await scenarioSubagent(run);
 	} else if (/\bhosttool\b/.test(text)) {
 		await scenarioHostTool(text, run);
+	} else if (/\bbigframe\b/.test(text)) {
+		scenarioBigFrame();
 	} else if (/\bracyedit\b/.test(text)) {
 		await scenarioRacyEdit(text, run);
 	} else if (/\btool\b/.test(text)) {
@@ -461,7 +516,7 @@ async function runPrompt(id, text) {
 	if (queued) send({ type: "queue_update", steering: state.queue.map(q => q.message), followUp: [] });
 	send({ type: "prompt_result", id, agentInvoked: true, status, sessionSettled: settled && !queued });
 	if (queued) {
-		await runPrompt(queued.id, queued.message);
+		startPrompt(queued.id, queued.message);
 		return;
 	}
 	if (!settled) {
@@ -600,7 +655,7 @@ function handle(frame) {
 				return send({ type: "queue_update", steering: state.queue.map(q => q.message), followUp: [] });
 			}
 			respond(type, id);
-			void runPrompt(id, frame.message);
+			startPrompt(id, frame.message);
 			return;
 		}
 		default:
@@ -610,7 +665,8 @@ function handle(frame) {
 
 if (env.FAKE_OMP_IGNORE_SIGTERM === "1") process.on("SIGTERM", () => process.stderr.write("fake-omp ignoring SIGTERM\n"));
 if (env.FAKE_OMP_SPAWN_CHILD === "1") {
-	const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+	const watcher = `const parent = ${process.pid}; const watch = setInterval(() => { try { process.kill(parent, 0); } catch { clearInterval(watch); setTimeout(() => process.exit(), 5000); } }, 500);`;
+	const child = spawn(process.execPath, ["-e", watcher], { stdio: "ignore" });
 	process.stderr.write(`fake-omp child pid ${child.pid}\n`);
 }
 

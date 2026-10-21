@@ -112,6 +112,24 @@ function renderBody(request: InteractionRequest, respond: Respond): HTMLElement[
 	}
 }
 
+/**
+ * Copies what the user entered (text, checked options) from `previous`'s fields to the same fields of `next`;
+ * returns the control of `next` (field or button) that matches the focused one.
+ */
+function carryEntries(previous: HTMLElement, next: HTMLElement): HTMLElement | undefined {
+	const before = previous.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea");
+	const after = next.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea");
+	if (before.length !== after.length) return undefined;
+	let focusTarget: HTMLElement | undefined;
+	before.forEach((control, index) => {
+		const target = after[index];
+		if (control.type === "checkbox" || control.type === "radio") (target as HTMLInputElement).checked = (control as HTMLInputElement).checked;
+		else if (control.tagName !== "BUTTON") target.value = control.value;
+		if (control === document.activeElement) focusTarget = target;
+	});
+	return focusTarget;
+}
+
 export interface InteractionsDeps {
 	post(message: WebviewMessage): void;
 	/** Reads `text` out through the screen-reader live region. */
@@ -124,7 +142,8 @@ export interface InteractionsDeps {
 /**
  * Pending OMP questions (confirm, select, input, editor, ask) as labelled cards above the composer, with
  * timeout countdowns. A new card is announced and focused unless the user is typing; answering returns
- * focus to the composer.
+ * focus to the composer; Escape cancels. A question shown again keeps what the user entered; one that
+ * cannot be shown is cancelled so OMP does not wait for its timeout.
  */
 export class InteractionsView {
 	readonly element = h("div", { class: "interactions" });
@@ -146,36 +165,54 @@ export class InteractionsView {
 		return [...this.#nodes.keys()];
 	}
 
+	/** Shows `pending`, replacing the card of the same question; throws after cancelling a question it cannot show. */
 	add(pending: PendingInteraction): void {
 		const { request } = pending;
-		const title = request.kind === "ask" ? (request.questions.length === 1 ? "Question" : `${request.questions.length} questions`) : request.title;
-		const titleId = `interaction-title-${++this.#titleSequence}`;
-		const el = h(
-			"div",
-			{ class: `interaction kind-${request.kind}`, attrs: { "data-id": request.id, role: "region", "aria-labelledby": titleId } },
-			h("div", { class: "interaction-title" }, h("span", { attrs: { id: titleId } }, title), h("span", { class: "spacer" }), h("span", { class: "countdown meta" })),
-			...renderBody(request, (id, response) => this.#respond(id, response)),
-		);
-		this.#nodes.get(request.id)?.remove();
+		const previous = this.#nodes.get(request.id);
+		let el: HTMLElement;
+		let title: string;
+		try {
+			title = request.kind === "ask" ? (request.questions.length === 1 ? "Question" : `${request.questions.length} questions`) : request.title;
+			const titleId = `interaction-title-${++this.#titleSequence}`;
+			el = h(
+				"div",
+				{ class: `interaction kind-${request.kind}`, attrs: { "data-id": request.id, role: "region", "aria-labelledby": titleId } },
+				h("div", { class: "interaction-title" }, h("span", { attrs: { id: titleId } }, title), h("span", { class: "spacer" }), h("span", { class: "countdown meta" })),
+				...renderBody(request, (id, response) => this.#respond(id, response)),
+			);
+		} catch (error) {
+			this.remove(request.id);
+			this.#deps.post({ type: "respond", id: request.id, response: { kind: "cancelled" } });
+			throw error;
+		}
+		el.addEventListener("keydown", event => {
+			if (event.key !== "Escape" || event.isComposing) return;
+			event.preventDefault();
+			this.#respond(request.id, { kind: "cancelled" });
+		});
 		this.#nodes.set(request.id, el);
-		this.element.append(el);
-		this.#deps.announce(`OMP asks: ${title}`);
-		if (!this.#deps.composerHasFocus()) el.querySelector<HTMLElement>("button, input, textarea")?.focus();
+		if (previous) {
+			const focusTarget = carryEntries(previous, el);
+			previous.replaceWith(el);
+			focusTarget?.focus();
+		} else {
+			this.element.append(el);
+			this.#deps.announce(`OMP asks: ${title}`);
+			if (!this.#deps.composerHasFocus()) el.querySelector<HTMLElement>("button, input, textarea")?.focus();
+		}
 		if (pending.expiresAt) {
 			this.#expiries.set(request.id, pending.expiresAt);
-			this.#tick();
 			this.#countdownTimer ??= window.setInterval(() => this.#tick(), 1000);
+		} else {
+			this.#expiries.delete(request.id);
 		}
+		this.#tick();
 	}
 
 	remove(id: string): void {
 		this.#nodes.get(id)?.remove();
 		this.#nodes.delete(id);
 		this.#expiries.delete(id);
-	}
-
-	clear(): void {
-		for (const id of this.ids()) this.remove(id);
 	}
 
 	#respond(id: string, response: InteractionResponse): void {

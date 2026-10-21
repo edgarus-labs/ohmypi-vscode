@@ -23,17 +23,20 @@ function activityOf(progress: SubagentProgress | undefined): string | undefined 
 	return progress.recentOutput?.at(-1);
 }
 
+/** Applies a progress record; a finished agent (`endedAt` set) only takes its counters, model and error. */
 function withProgress(view: AgentView, progress: SubagentProgress | undefined): AgentView {
 	if (!progress) return view;
 	const next: AgentView = { ...view };
-	if (progress.status) next.status = progress.status as AgentStatus;
+	const ended = next.endedAt !== undefined;
+	if (progress.status && !ended) next.status = progress.status as AgentStatus;
 	if (progress.description) next.description = progress.description;
 	if (progress.resolvedModel) next.model = progress.resolvedModel;
 	if (progress.toolCount !== undefined) next.toolCount = progress.toolCount;
 	if (progress.tokens !== undefined) next.tokens = progress.tokens;
 	if (progress.cost !== undefined) next.costUsd = progress.cost;
-	const error = progress.retryFailure?.errorMessage ?? progress.error;
+	const error = progress.error || progress.retryFailure?.errorMessage;
 	if (error) next.error = error;
+	else if (!ended) delete next.error;
 	const activity = activityOf(progress);
 	if (activity && (next.status === "running" || next.status === "pending")) next.activity = activity;
 	else delete next.activity;
@@ -90,6 +93,8 @@ export class AgentRegistry {
 			if (description) view.description = description;
 			if (snapshot.sessionFile) view.sessionFile = snapshot.sessionFile;
 			if (view.startedAt === undefined) view.startedAt = snapshot.lastUpdate - (snapshot.progress?.durationMs ?? 0);
+			if (snapshot.status === "running" || snapshot.status === "pending") delete view.endedAt;
+			else view.endedAt ??= snapshot.lastUpdate;
 			view = withProgress(view, snapshot.progress);
 			this.#subagents.set(snapshot.id, view);
 		}
@@ -137,6 +142,23 @@ export class AgentRegistry {
 		if (this.#subagents.size === 0) return;
 		this.#subagents.clear();
 		this.#publish();
+	}
+
+	/** The process running the subagents went away: those still running or pending end as `failed` with `reason`. */
+	interruptSubagents(reason: string): void {
+		let changed = false;
+		for (const [id, agent] of this.#subagents) {
+			if (agent.status !== "running" && agent.status !== "pending") continue;
+			const failed: AgentView = { ...agent, status: "failed", endedAt: Date.now(), error: reason };
+			delete failed.activity;
+			this.#subagents.set(id, failed);
+			changed = true;
+		}
+		if (changed) this.#publish();
+	}
+
+	dispose(): void {
+		this.#change.dispose();
 	}
 
 	#publish(): void {

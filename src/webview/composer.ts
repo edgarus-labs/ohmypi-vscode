@@ -158,6 +158,7 @@ export class Composer {
 		});
 		this.element.addEventListener("drop", event => this.#drop(event));
 		window.addEventListener("resize", () => this.autosize());
+		this.#setAttachments([...deps.state.attachments]);
 	}
 
 	/** Labels of the attached chips. */
@@ -200,9 +201,9 @@ export class Composer {
 		this.input.focus();
 	}
 
-	/** Posts the draft; ignored while the previous prompt still waits for the host's `sendResult`. */
+	/** Posts the draft; ignored while the previous prompt still waits for the host's `sendResult` or images are still being read. */
 	submit(mode: PromptMode): void {
-		if (this.#pending || !this.#hasContent() || this.#unavailable) return;
+		if (this.#pending || this.#reading.count > 0 || !this.#hasContent() || this.#unavailable) return;
 		this.#slash.close();
 		const text = this.input.value;
 		const id = crypto.randomUUID();
@@ -261,13 +262,15 @@ export class Composer {
 		}
 		this.#sendButton.setAttribute("aria-label", label);
 		this.#sendButton.title = action === "stop" ? "Abort the current turn (Esc)" : action === "steer" ? "Steer the running agent (Enter)" : "Send (Enter)";
-		this.#sendButton.disabled = this.#unavailable || (action !== "stop" && this.#pending !== undefined) || (action === "send" && !this.#hasContent());
+		this.#sendButton.disabled =
+			this.#unavailable || (action !== "stop" && (this.#pending !== undefined || this.#reading.count > 0)) || (action === "send" && !this.#hasContent());
 		this.#followUpButton.classList.toggle("hidden", action !== "steer");
 	}
 
-	/** Shows `next` as chips, keeping the chips (and previews) of attachments that stay. */
+	/** Shows `next` as chips, keeping the chips (and previews) of attachments that stay, and saves them with the draft. */
 	#setAttachments(next: Attachment[]): void {
 		this.#attachments = next;
+		this.#deps.state.setAttachments(next);
 		const kept = new Set(next.map(attachment => attachment.id));
 		for (const [id, chip] of this.#chips) {
 			if (kept.has(id)) continue;
@@ -327,14 +330,15 @@ export class Composer {
 		}
 	}
 
+	/** Attaches pasted images; pasted text goes into the input, or becomes an attachment when long. */
 	#paste(event: ClipboardEvent): void {
 		const images = imageFiles(event.clipboardData);
-		if (images.length > 0) {
-			event.preventDefault();
-			this.#addImageFiles(images);
+		if (images.length > 0) this.#addImageFiles(images);
+		const text = event.clipboardData?.getData("text/plain") ?? "";
+		if (text === "") {
+			if (images.length > 0) event.preventDefault();
 			return;
 		}
-		const text = event.clipboardData?.getData("text/plain") ?? "";
 		if (classifyPaste(text) === "inline") return;
 		event.preventDefault();
 		this.#setAttachments([...this.#attachments, { id: crypto.randomUUID(), kind: "text", text, label: `Pasted text ${++this.#pastedTextSequence}` }]);
@@ -365,6 +369,7 @@ export class Composer {
 			const finished = () => {
 				this.#reading.count--;
 				this.#reading.bytes -= file.size;
+				this.#renderActions();
 			};
 			reader.onload = () => {
 				finished();
@@ -381,5 +386,6 @@ export class Composer {
 			};
 			reader.readAsDataURL(file);
 		}
+		this.#renderActions();
 	}
 }

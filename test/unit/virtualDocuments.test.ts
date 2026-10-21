@@ -26,4 +26,21 @@ describe("VirtualDocuments", () => {
 		for (let i = 0; i < 20; i++) await docs.show(`doc${i}.md`, `doc ${i}`);
 		assert.throws(() => docs.provideTextDocumentContent(first as never), /no longer available/);
 	});
+
+	it("addresses its documents apart from those of an earlier activation", async () => {
+		const earlier = await shown(new VirtualDocuments(), "agent-main.md", "old");
+		const current = await shown(new VirtualDocuments(), "agent-main.md", "new");
+		assert.notEqual(current.toString(), earlier.toString());
+	});
+
+	it("forgets the oldest documents once their text exceeds the character budget, keeping the newest", async () => {
+		const docs = new VirtualDocuments(10);
+		const first = await shown(docs, "a.md", "aaaaaa");
+		const second = await shown(docs, "b.md", "bbbbbb");
+		assert.throws(() => docs.provideTextDocumentContent(first as never), /no longer available/);
+		assert.equal(docs.provideTextDocumentContent(second as never), "bbbbbb");
+		const large = await shown(docs, "c.md", "c".repeat(20));
+		assert.throws(() => docs.provideTextDocumentContent(second as never), /no longer available/);
+		assert.equal(docs.provideTextDocumentContent(large as never), "c".repeat(20));
+	});
 });

@@ -45,4 +45,63 @@ describe("Emitter", () => {
 		emitter.fire(1);
 		assert.deepEqual(seen, []);
 	});
+
+	it("skips a listener disposed by an earlier listener during the same fire", () => {
+		const emitter = new Emitter<number>();
+		const seen: string[] = [];
+		emitter.event(() => {
+			seen.push("first");
+			second.dispose();
+		});
+		const second = emitter.event(() => seen.push("second"));
+		emitter.fire(1);
+		assert.deepEqual(seen, ["first"]);
+	});
+
+	it("stops delivering when a listener disposes the emitter during fire", () => {
+		const emitter = new Emitter<number>();
+		const seen: string[] = [];
+		emitter.event(() => {
+			seen.push("first");
+			emitter.dispose();
+		});
+		emitter.event(() => seen.push("second"));
+		emitter.fire(1);
+		assert.deepEqual(seen, ["first"]);
+	});
+
+	it("treats each subscription of the same function separately", () => {
+		const emitter = new Emitter<number>();
+		const seen: number[] = [];
+		const listener = (value: number) => seen.push(value);
+		const first = emitter.event(listener);
+		emitter.event(listener);
+		emitter.fire(1);
+		first.dispose();
+		emitter.fire(2);
+		assert.deepEqual(seen, [1, 1, 2]);
+	});
+
+	it("ignores subscriptions made after dispose", () => {
+		const emitter = new Emitter<number>();
+		const seen: number[] = [];
+		emitter.dispose();
+		const sub = emitter.event(v => seen.push(v));
+		emitter.fire(1);
+		sub.dispose();
+		assert.deepEqual(seen, []);
+	});
+
+	it("keeps delivering when the error handler itself throws and rethrows that failure afterwards", () => {
+		const emitter = new Emitter<string>(() => {
+			throw new Error("handler broke");
+		});
+		const seen: string[] = [];
+		emitter.event(() => {
+			throw new Error("boom");
+		});
+		emitter.event(v => seen.push(v));
+		assert.throws(() => emitter.fire("x"), /handler broke/);
+		assert.deepEqual(seen, ["x"]);
+	});
 });

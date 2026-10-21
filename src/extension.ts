@@ -211,7 +211,7 @@ class OmpHost implements vscode.Disposable {
 	}
 
 	stop(): Promise<void> {
-		return this.supervisor.stop();
+		return this.supervisor.shutdown();
 	}
 
 	dispose(): void {

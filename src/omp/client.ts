@@ -48,7 +48,7 @@ export interface OmpTransport {
 
 /**
  * A command failed. `code` is OMP's machine-readable code when the server sent
- * one, otherwise `timeout`, `closed` or `write_failed` for local failures.
+ * one, otherwise `timeout`, `closed`, `write_failed` or `duplicate_id` for local failures.
  */
 export class OmpRequestError extends Error {
 	constructor(
@@ -64,13 +64,14 @@ export class OmpRequestError extends Error {
 export interface RequestOptions {
 	/** 0 disables the timeout. */
 	timeoutMs?: number;
-	/** Caller-chosen id, e.g. to correlate a prompt with its `prompt_result`. */
+	/** Caller-chosen id, e.g. to correlate a prompt with its `prompt_result`; must not match a request still pending. */
 	id?: string;
 }
 
 export interface OmpRpcClientOptions {
 	/** Frames are traced through `logger.trace` while `logger.traceEnabled` is on. */
 	logger: Logger;
+	/** How long `start` waits for the `ready` frame; 0 waits without a deadline. */
 	readyTimeoutMs?: number;
 	requestTimeoutMs?: number;
 }
@@ -96,6 +97,8 @@ interface PendingRequest {
 
 const TRACE_STRING_LIMIT = 200;
 const TRACE_FRAME_LIMIT = 2000;
+/** Codes of requests that failed in the client or transport, without an answer from OMP. */
+const LOCAL_FAILURES: ReadonlySet<string | undefined> = new Set(["timeout", "closed", "write_failed", "duplicate_id"]);
 
 function abbreviate(frame: unknown): string {
 	const json = JSON.stringify(frame, (_key, value: unknown) =>
@@ -213,12 +216,18 @@ export class OmpRpcClient implements Disposable {
 		return this.#protocolVersion;
 	}
 
-	/** Wait for the `ready` frame and negotiate protocol v2 when the server offers it. */
+	/**
+	 * Wait for the `ready` frame and negotiate protocol v2 when the server offers it.
+	 * A refused negotiation stays on v1; an unanswered one fails, since OMP may have switched.
+	 */
 	async start(): Promise<void> {
-		const timer = setTimeout(
-			() => this.#ready.reject(new Error(`OMP did not send a ready frame within ${this.#readyTimeoutMs} ms`)),
-			this.#readyTimeoutMs,
-		);
+		const timer =
+			this.#readyTimeoutMs > 0
+				? setTimeout(
+						() => this.#ready.reject(new Error(`OMP did not send a ready frame within ${this.#readyTimeoutMs} ms`)),
+						this.#readyTimeoutMs,
+					)
+				: undefined;
 		let ready: ReadyFrame;
 		try {
 			ready = await this.#ready.promise;
@@ -230,7 +239,7 @@ export class OmpRpcClient implements Disposable {
 			const result = await this.request("negotiate_protocol", { protocolVersion: 2 });
 			this.#protocolVersion = result.protocolVersion === 2 ? 2 : 1;
 		} catch (error) {
-			if (error instanceof OmpRequestError && error.code === "closed") throw error;
+			if (!(error instanceof OmpRequestError) || LOCAL_FAILURES.has(error.code)) throw error;
 			this.#logger.warn("OMP protocol v2 negotiation failed; staying on v1", error);
 		}
 	}
@@ -245,6 +254,9 @@ export class OmpRpcClient implements Disposable {
 			return Promise.reject(new OmpRequestError(`${closeSummary(this.#closed)}; cannot send ${type}`, type, "closed"));
 		}
 		const id = options?.id ?? this.nextId();
+		if (this.#pending.has(id)) {
+			return Promise.reject(new OmpRequestError(`OMP request id ${id} is already pending; cannot send ${type}`, type, "duplicate_id"));
+		}
 		const frame = { ...(params ?? {}), id, type };
 		const { promise, resolve, reject } = deferred<CommandMap[K]["result"]>();
 		const pending: PendingRequest = { command: type, resolve: resolve as (data: unknown) => void, reject };
@@ -294,6 +306,7 @@ export class OmpRpcClient implements Disposable {
 		for (const subscription of this.#subscriptions) subscription.dispose();
 		this.#closed ??= { code: null, signal: null, error: new Error("client disposed") };
 		this.#rejectAll("OMP client disposed", "closed");
+		this.#ready.reject(new Error("OMP client disposed before it was ready"));
 		for (const emitter of [
 			this.#sessionEvent,
 			this.#promptResult,
@@ -312,7 +325,6 @@ export class OmpRpcClient implements Disposable {
 
 	#write(frame: { type: string }, traced: object = frame, onError?: (error: Error) => void): void {
 		const line = `${JSON.stringify(frame)}\n`;
-		if (this.#logger.traceEnabled) this.#logger.trace("out", abbreviate(traced));
 		// OMP never reassembles rpc_chunk input; an oversized command still has to go out as one line.
 		const limit = this.#readyFrame?.maxFrameBytes;
 		if (limit !== undefined) {
@@ -324,6 +336,7 @@ export class OmpRpcClient implements Disposable {
 			}
 		}
 		this.#transport.write(line, onError);
+		if (this.#logger.traceEnabled) this.#logger.trace("out", abbreviate(traced));
 	}
 
 	#reportWriteFailure(type: string): (error: Error) => void {
@@ -434,11 +447,19 @@ export class OmpRpcClient implements Disposable {
 			this.#logger.debug("Duplicate OMP ready frame ignored");
 			return;
 		}
-		const maxFrameBytes = isPositiveInteger(frame.maxFrameBytes) ? frame.maxFrameBytes : undefined;
-		const maxReassembledFrameBytes = isPositiveInteger(frame.maxReassembledFrameBytes) ? frame.maxReassembledFrameBytes : undefined;
+		let maxFrameBytes = isPositiveInteger(frame.maxFrameBytes) ? frame.maxFrameBytes : undefined;
+		let maxReassembledFrameBytes = isPositiveInteger(frame.maxReassembledFrameBytes) ? frame.maxReassembledFrameBytes : undefined;
+		if ((maxFrameBytes ?? DEFAULT_CHUNK_LIMITS.maxFrameBytes) >= (maxReassembledFrameBytes ?? DEFAULT_CHUNK_LIMITS.maxReassembledFrameBytes)) {
+			this.#logger.warn(
+				`OMP advertised inconsistent frame limits (maxFrameBytes ${String(frame.maxFrameBytes)}, maxReassembledFrameBytes ${String(frame.maxReassembledFrameBytes)}); using the defaults`,
+			);
+			maxFrameBytes = undefined;
+			maxReassembledFrameBytes = undefined;
+		}
 		this.#readyFrame = { ...frame, maxFrameBytes, maxReassembledFrameBytes };
 		if (maxFrameBytes !== undefined) this.#decoder.maxLineBytes = maxFrameBytes;
 		this.#reassembler = new ChunkReassembler({
+			...DEFAULT_CHUNK_LIMITS,
 			maxFrameBytes: maxFrameBytes ?? DEFAULT_CHUNK_LIMITS.maxFrameBytes,
 			maxReassembledFrameBytes: maxReassembledFrameBytes ?? DEFAULT_CHUNK_LIMITS.maxReassembledFrameBytes,
 		});

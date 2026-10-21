@@ -55,7 +55,10 @@ export function resolveExecutable(
 
 	const names = win ? ["omp.exe", "omp.cmd"] : ["omp"];
 	const pathValue = win ? (env.Path ?? env.PATH ?? env.path) : env.PATH;
-	const dirs = (pathValue ?? "").split(win ? ";" : ":").filter(dir => dir.length > 0);
+	const raw = pathValue ?? "";
+	// Windows allows quoting a Path entry, which may then contain `;`; the quotes are not part of the directory.
+	const entries = win ? (raw.match(/(?:"[^"]*"|[^;"])+/g) ?? []).map(dir => dir.replaceAll('"', "")) : raw.split(":");
+	const dirs = entries.filter(dir => dir.length > 0);
 	dirs.push(pathApi.join(home, ".local", "bin"), pathApi.join(home, ".bun", "bin"));
 
 	const tried: string[] = [];

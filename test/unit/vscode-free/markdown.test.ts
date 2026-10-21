@@ -10,6 +10,12 @@ describe("renderMarkdown", () => {
 		assert.ok(html.includes("&amp;"), html);
 	});
 
+	it("never lets a fence language break out of its attribute", () => {
+		const html = renderMarkdown('```" onmouseover="x\ncode\n```');
+		assert.equal(html.includes("data-lang"), false, html);
+		assert.equal(html.includes('onmouseover="'), false, html);
+	});
+
 	it("renders code fences as colored, escaped code under a language label and a Copy button", () => {
 		const html = renderMarkdown("before\n```ts\nconst a = 1 < 2; // done\n```\nafter");
 		assert.ok(

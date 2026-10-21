@@ -114,6 +114,9 @@ export class OmpService implements OmpServiceApi {
 					return warning;
 				},
 				detached: reason => {
+					const headline = reason.split("\n", 1)[0];
+					this.#store.interrupt(headline);
+					this.#agentRegistry.interruptSubagents(headline);
 					this.#store.noteTurnOutcome("error");
 					this.#tracker.terminate(reason);
 					this.#store.update({ isCompacting: false });
@@ -181,6 +184,8 @@ export class OmpService implements OmpServiceApi {
 		this.stop().catch(error => this.#logger.error("Failed to stop OMP", error));
 		this.#lifecycle.dispose();
 		this.#ui.dispose();
+		this.#store.dispose();
+		this.#agentRegistry.dispose();
 	}
 
 	async listModels(): Promise<ModelView[]> {
@@ -318,7 +323,8 @@ export class OmpService implements OmpServiceApi {
 	async getAgentTranscript(agentId: string): Promise<TranscriptItem[]> {
 		if (agentId === "main") return [...this.#store.transcript];
 		const { messages } = await this.#request("get_subagent_messages", { subagentId: agentId });
-		return historyToItems(messages);
+		const status = this.#agentRegistry.agents.find(agent => agent.id === agentId)?.status;
+		return historyToItems(messages, { running: status === "running" || status === "pending" });
 	}
 
 	// -------------------------------------------------------------------------

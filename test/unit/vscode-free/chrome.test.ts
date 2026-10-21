@@ -28,6 +28,12 @@ describe("conversation chrome helpers", () => {
 		assert.equal(todoSummary([{ name: "p", tasks: [{ content: "a", status: "pending" }] }]), "todos 0/1");
 	});
 
+	it("leaves abandoned tasks out of the todo count, so a finished list reads N/N", () => {
+		const phases = [{ name: "p", tasks: [{ content: "a", status: "completed" }, { content: "b", status: "abandoned" }, { content: "c", status: "blocked" }] }];
+		assert.equal(todoSummary(phases), "todos 1/2");
+		assert.equal(todoSummary([{ name: "p", tasks: [{ content: "a", status: "completed" }, { content: "b", status: "abandoned" }] }]), "todos 1/1");
+	});
+
 	it("formats context usage and cost", () => {
 		assert.equal(usageText({}), "");
 		assert.equal(usageText({ contextUsage: { tokens: 13_000, contextWindow: 100_000, percent: 13.2 } }), "ctx 13%");

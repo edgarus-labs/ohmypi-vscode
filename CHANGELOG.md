@@ -15,6 +15,29 @@
 - The todos strip can be closed; it stays hidden, also after a reload, until the todos change.
 - The empty chat follows the connection (`Starting OMP…`, `OMP stopped: …`) and offers **Start OMP** while OMP is not running.
 - Ask options show their preview as a tooltip.
+- Only PNG, JPEG, GIF and WebP images are attached; Send waits for pasted images to finish loading, and text pasted together with an image is kept. File and pasted-text attachments survive a webview reload, and you are told which images were lost.
+- Escape cancels a question, a half-typed answer survives a chat refresh, and a question that cannot be shown is cancelled at once instead of making OMP wait for its timeout.
+- The `+` file picker respects `files.exclude` and `search.exclude` and stops searching when closed. The `Add File to OMP Chat` menus also appear in remote windows; the Explorer entry shows only for local and remote files and folders.
+- OMP no longer starts on its own in a window with no folder open; it starts on first use. Virtual workspaces are declared unsupported.
+- The editor context leaves out the active editor when it is outside the workspace (user settings, untitled buffers, files elsewhere) and caps each diagnostic message at 300 characters.
+- When OMP exits, running subagents are marked failed, a streaming reply stops streaming and running tools show `Interrupted: …`. Reloaded compacted sessions show where the conversation was compacted.
+- Startup fails instead of silently staying on protocol v1 when OMP never answers the protocol negotiation. Protocol v2 chunks are validated as OMP does (chunk count, 256 KiB payload, canonical base64), and inconsistent frame limits in OMP's `ready` frame are ignored with a warning.
+- Fixed: a message with a long run of `@` mentions froze the chat.
+- Fixed: editor context containing `</editor-context>`, or pasted text containing `</pasted-text>` in any letter case, ended its block early.
+- Fixed: after OMP failed, the next prompt or command bound a different session instead of resuming the current one; with `omp.startup: manual` the first prompt now resumes the last session. Prompts and commands issued during an automatic or settings-change restart wait for OMP instead of failing.
+- Fixed: closing the window while OMP restarted after a settings change could leave an OMP process running.
+- Fixed: a Stop pressed before OMP accepted a prompt showed the next prompt as "aborting".
+- Fixed: finished subagents loaded after a reload or session switch showed a growing duration; a retry error stayed after the retry succeeded; a late progress update marked a finished subagent as running again; a running subagent's transcript showed its current tool as failed.
+- Fixed: a tool that wrote a file without reporting its previous content could be missing from Changes; a file created by a tool that reports empty previous content showed as modified and its tool diff said `No diff recorded`; switching sessions could bring the previous session's changes back.
+- Fixed: agents whose parents form a loop disappeared from the Agents view; the view also refreshes faster with many subagents.
+- Fixed: after the extension host restarted, reopening an agent summary, transcript or tool diff could show the previous session's content. Generated documents also have a total memory budget, and transcripts with very large tool output open again.
+- Fixed: durations just under a minute showed as `60.0s` and durations over an hour had no hours unit; costs just under $1 show as `$1.00`; restored tool calls no longer show bogus durations; todo counts leave out abandoned tasks; the effort selector no longer shows a stale level; models whose pricing lacks cache rates no longer lose their price.
+- Fixed: file links for `read` calls with `:conflicts`, `:img` or video time selectors; Windows paths shown relative to the workspace whatever the drive-letter case or separator; full MCP tool names when the server name contains underscores; no Diff button on failed edits; removed `--` and added `++` lines keep their diff colors.
+- Fixed: login URLs and chat links opened with re-encoded query values; they now open exactly as written.
+- Fixed: OMP's stderr broke characters split across output chunks and logged very long lines unbounded; output from a leftover process that still holds OMP's pipe was delivered after OMP exited; on Windows `omp` was not found in quoted `PATH` entries or ones containing `;`.
+- Fixed: short panels keep the input box visible; high-contrast themes show hover outlines; light themes get readable warning text; long text in questions wraps.
+- `omp.executablePath` and `omp.extraArgs` now have machine scope: a repository's `.vscode/settings.json` can no longer choose which executable runs or with which arguments (for example `--approval-mode`). Set them in your user settings, or the remote machine's settings. Workspace-level values are ignored.
+- The message meta line (model of a reply) is shown in the muted color at full opacity instead of dimmed, for readable contrast.
 
 ## 0.5.0
 

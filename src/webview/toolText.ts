@@ -173,12 +173,19 @@ export function looksLikeDiff(text: string): boolean {
 
 export type DiffLineClass = "add" | "del" | "hunk" | "meta" | "ctx";
 
-export function diffLineClass(line: string): DiffLineClass {
-	if (line.startsWith("+++") || line.startsWith("---")) return "meta";
-	if (line.startsWith("+")) return "add";
-	if (line.startsWith("-")) return "del";
-	if (line.startsWith("@@")) return "hunk";
-	return "ctx";
+/**
+ * The class of each diff line. `---` and `+++` lines are a file header only as a pair (`--- a/x` directly followed by
+ * `+++ b/x`); alone they are a removed `--…` or an added `++…` line.
+ */
+export function diffLineClasses(lines: readonly string[]): DiffLineClass[] {
+	return lines.map((line, index) => {
+		if (line.startsWith("---") && lines[index + 1]?.startsWith("+++")) return "meta";
+		if (line.startsWith("+++") && lines[index - 1]?.startsWith("---")) return "meta";
+		if (line.startsWith("+")) return "add";
+		if (line.startsWith("-")) return "del";
+		if (line.startsWith("@@")) return "hunk";
+		return "ctx";
+	});
 }
 
 /** Within the text after a diff line's sign, the part that differs from the line it is paired with. */
@@ -212,17 +219,18 @@ function differing(removed: string, added: string): [ChangedSpan | undefined, Ch
  * nothing in common is left unmarked: the whole line is the change.
  */
 export function changedSpans(lines: readonly string[]): Array<ChangedSpan | undefined> {
+	const classes = diffLineClasses(lines);
 	const spans: Array<ChangedSpan | undefined> = lines.map(() => undefined);
 	let i = 0;
 	while (i < lines.length) {
-		if (diffLineClass(lines[i]) !== "del") {
+		if (classes[i] !== "del") {
 			i++;
 			continue;
 		}
 		const removedStart = i;
-		while (i < lines.length && diffLineClass(lines[i]) === "del") i++;
+		while (i < lines.length && classes[i] === "del") i++;
 		const addedStart = i;
-		while (i < lines.length && diffLineClass(lines[i]) === "add") i++;
+		while (i < lines.length && classes[i] === "add") i++;
 		const pairs = Math.min(addedStart - removedStart, i - addedStart);
 		for (let p = 0; p < pairs; p++) {
 			[spans[removedStart + p], spans[addedStart + p]] = differing(lines[removedStart + p].slice(1), lines[addedStart + p].slice(1));

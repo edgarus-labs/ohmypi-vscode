@@ -10,6 +10,8 @@
 	--success: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
 	--error: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
 	--warning: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+	/* Warning text: list.warningForeground is darker on light themes, where editorWarning.foreground falls below 4.5:1. */
+	--warning-text: var(--vscode-list-warningForeground, var(--warning));
 	--progress: var(--vscode-progressBar-background, var(--vscode-charts-blue));
 	--radius: 12px;
 	--radius-sm: 6px;
@@ -360,9 +362,18 @@ details > summary:hover {
 }
 
 @container (max-width: 240px) {
-	.state-word,
 	.activity {
 		display: none;
+	}
+
+	/* Hidden from view only: screen readers still read the state, and the indicator's tooltip names it. */
+	.state-word {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 }
 
@@ -760,13 +771,7 @@ h3.md-h {
 .msg-meta {
 	margin-top: 4px;
 	font-size: 0.85em;
-	opacity: 0.7;
-	transition: opacity var(--ease);
-}
-
-.assistant:hover .msg-meta,
-.assistant:focus-within .msg-meta {
-	opacity: 1;
+	color: var(--muted);
 }
 
 .item.turn-summary {
@@ -859,7 +864,7 @@ h3.md-h {
 }
 
 .notice.level-warning {
-	color: var(--warning);
+	color: var(--warning-text);
 	background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
 
@@ -1201,17 +1206,35 @@ pre.out.command-output {
 	margin-top: 10px;
 }
 
-/* Dock: compact cards above the composer */
+/* Dock: compact cards above the composer; in a short panel the cards scroll so the composer stays in view */
 .dock {
-	flex: none;
+	flex: 0 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 .dock-inner {
+	flex: 0 1 auto;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	padding-top: 6px;
 	padding-bottom: var(--pad);
+}
+
+.dock-stack {
+	flex: 0 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.dock-stack:not(:has(> :not(:empty))) {
+	display: none;
 }
 
 .statusline:empty,
@@ -1353,6 +1376,7 @@ pre.out.command-output {
 }
 
 .interaction {
+	min-width: 0;
 	padding: 10px 12px;
 	border-radius: var(--radius);
 	background: var(--vscode-editorWidget-background, var(--card));
@@ -1360,6 +1384,7 @@ pre.out.command-output {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	overflow-wrap: anywhere;
 }
 
 .interaction-title {
@@ -1764,7 +1789,7 @@ button.send:disabled {
 	border-radius: 3px;
 }
 
-.chip-remove {
+button.chip-remove {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -1776,9 +1801,19 @@ button.send:disabled {
 	color: var(--muted);
 }
 
-.chip-remove:hover {
+button.chip-remove:hover {
 	color: var(--fg);
 	background: var(--vscode-toolbar-hoverBackground, var(--hover));
+}
+
+/* High contrast themes have no hover fills: hovered controls get the theme's dashed outline instead. */
+body.vscode-high-contrast button:hover:not(:disabled, :focus-visible),
+body.vscode-high-contrast details > summary:hover:not(:focus-visible),
+body.vscode-high-contrast .model-pill:hover,
+body.vscode-high-contrast .ask-option:hover,
+body.vscode-high-contrast .slash-option:hover {
+	outline: 1px dashed var(--vscode-contrastActiveBorder);
+	outline-offset: -1px;
 }
 
 @container (max-width: 420px) {
@@ -2039,7 +2074,7 @@ button.todos-dismiss:hover {
 }
 
 .usage-limit.warning .usage-limit-percent {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .usage-limit.error .usage-limit-percent {

@@ -65,6 +65,11 @@ describe("toolArgPaths", () => {
 		assert.deepEqual(toolArgPaths({ input }), ["hello.txt", "src/app.py", "src/main.py", "old.txt"]);
 	});
 
+	it("parses apply_patch headers from an input with CRLF line endings", () => {
+		const input = "*** Begin Patch\r\n*** Add File: hello.txt\r\n+Hello\r\n*** Update File: src/app.py\r\n*** Move to: src/main.py\r\n*** End Patch\r\n";
+		assert.deepEqual(toolArgPaths({ input }), ["hello.txt", "src/app.py", "src/main.py"]);
+	});
+
 	it("returns nothing for non-objects", () => {
 		assert.deepEqual(toolArgPaths(undefined), []);
 		assert.deepEqual(toolArgPaths("a.ts"), []);

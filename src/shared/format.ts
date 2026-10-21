@@ -1,15 +1,20 @@
 import type { TranscriptItem, TurnStatus } from "../omp/api";
 
+/** `$0.0215` below a dollar, `$3.46` from a dollar on; the precision follows the cost as rounded to four decimals. */
 export function formatCost(usd: number): string {
-	return `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`;
+	const fine = usd.toFixed(4);
+	return `$${Number(fine) < 1 ? fine : usd.toFixed(2)}`;
 }
 
-/** `850ms`, `12.3s`, `2m 5s`. */
+/** `850ms`, `12.3s`, `2m 5s`, `1h 15m`; rounded before the unit is chosen, negative durations read as `0ms`. */
 export function formatDuration(ms: number): string {
-	if (ms < 1000) return `${Math.round(ms)}ms`;
-	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-	const total = Math.round(ms / 1000);
-	return `${Math.floor(total / 60)}m ${total % 60}s`;
+	const milliseconds = Math.round(Math.max(0, ms));
+	if (milliseconds < 1000) return `${milliseconds}ms`;
+	const tenths = Math.round(milliseconds / 100);
+	if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
+	const seconds = Math.round(milliseconds / 1000);
+	if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+	return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m`;
 }
 
 /** `12s`, `1m 05s`, `1h 02m`: the ticking time of a turn. */
@@ -63,6 +68,7 @@ export function relativeTime(epochMs: number, now: number): string {
 
 /** Markdown fence longer than any backtick run inside `text`. */
 export function fenceFor(text: string): string {
-	const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(match => match[0].length));
+	let longest = 0;
+	for (const match of text.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
 	return "`".repeat(Math.max(3, longest + 1));
 }

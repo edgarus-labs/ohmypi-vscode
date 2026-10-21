@@ -29,9 +29,10 @@ describe("chat.css", () => {
 		assert.match(body, /row-gap: \d+px;/);
 	});
 
-	it("shows message metadata without hover, dimmed", () => {
-		const opacity = /opacity: ([\d.]+);/.exec(rule(".msg-meta"))?.[1];
-		assert.ok(opacity !== undefined && Number(opacity) > 0, `opacity ${opacity}`);
+	it("shows message metadata in the muted color at full opacity", () => {
+		const body = rule(".msg-meta");
+		assert.match(body, /color: var\(--muted\);/);
+		assert.doesNotMatch(body, /opacity:/);
 	});
 
 	it("sizes text relative to the editor font instead of fixed pixels", () => {

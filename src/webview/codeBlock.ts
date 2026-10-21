@@ -3,7 +3,7 @@ import type { RenderContext } from "./context";
 import { copyText } from "./copy";
 import { h } from "./dom";
 import { renderMarkdown } from "./markdown";
-import { type ChangedSpan, changedSpans, cutTo, diffLineClass, splitLineNumbers } from "./toolText";
+import { type ChangedSpan, changedSpans, cutTo, type DiffLineClass, diffLineClasses, splitLineNumbers } from "./toolText";
 
 /** Lines and characters of a closed row's dim preview. */
 export const PREVIEW_LINES = 5;
@@ -133,8 +133,7 @@ export function proseBlock(row: RowView, source: string): HTMLElement {
 	);
 }
 
-function diffLine(line: string, changed: ChangedSpan | undefined): HTMLElement {
-	const kind = diffLineClass(line);
+function diffLine(line: string, kind: DiffLineClass, changed: ChangedSpan | undefined): HTMLElement {
 	const el = h("div", { class: `diff-line d-${kind}` });
 	if (kind !== "add" && kind !== "del") {
 		el.textContent = line || " ";
@@ -161,8 +160,9 @@ export function diffView(row: RowView, key: string, diff: string): HTMLElement {
 	const lines = diff.replace(/\n+$/, "").split("\n");
 	const limit = row.ctx.isOpen(key) === true ? DIFF_LINES : DIFF_PREVIEW_LINES;
 	const shown = lines.length > limit ? lines.slice(0, limit) : lines;
+	const classes = diffLineClasses(lines);
 	const spans = changedSpans(shown);
-	const view = h("div", { class: "diff-view" }, ...shown.map((line, index) => diffLine(line, spans[index])));
+	const view = h("div", { class: "diff-view" }, ...shown.map((line, index) => diffLine(line, classes[index], spans[index])));
 	if (shown.length === lines.length) return h("div", { class: "code-block" }, view);
 	const more =
 		limit === DIFF_PREVIEW_LINES

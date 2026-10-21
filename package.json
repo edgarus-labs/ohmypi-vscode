@@ -21,11 +21,11 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "OMP runs commands and edits files in the workspace, so it does not start in Restricted Mode. Trust the workspace to use OMP.",
-      "restrictedConfigurations": [
-        "omp.executablePath",
-        "omp.extraArgs"
-      ]
+      "description": "OMP runs commands and edits files in the workspace, so it does not start in Restricted Mode. Trust the workspace to use OMP."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "OMP runs as a local process in the workspace folder, so it needs the folder on disk."
     }
   },
   "contributes": {
@@ -298,20 +298,21 @@
       "explorer/context": [
         {
           "command": "omp.addFileToChat",
+          "when": "resourceScheme == file || resourceScheme == vscode-remote",
           "group": "omp@1"
         }
       ],
       "editor/context": [
         {
           "command": "omp.addFileToChat",
-          "when": "resourceScheme == file",
+          "when": "resourceScheme == file || resourceScheme == vscode-remote",
           "group": "omp@1"
         }
       ],
       "editor/title/context": [
         {
           "command": "omp.addFileToChat",
-          "when": "resourceScheme == file",
+          "when": "resourceScheme == file || resourceScheme == vscode-remote",
           "group": "omp@1"
         }
       ],
@@ -352,7 +353,7 @@
         "omp.executablePath": {
           "type": "string",
           "default": "",
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "Path to the omp executable. Empty: search PATH and common install locations."
         },
         "omp.extraArgs": {
@@ -361,7 +362,7 @@
             "type": "string"
           },
           "default": [],
-          "scope": "machine-overridable",
+          "scope": "machine",
           "description": "Extra CLI arguments passed to `omp --mode rpc-ui` (for example `--profile work`). Model, provider and approval configuration stay in OMP."
         },
         "omp.startup": {
@@ -393,7 +394,7 @@
         "omp.traceRpc": {
           "type": "boolean",
           "default": false,
-          "description": "Log every RPC frame (abbreviated, secrets redacted) to the output channel."
+          "description": "Log every RPC frame (abbreviated; answers to input requests redacted) to the output channel."
         },
         "omp.includeEditorContext": {
           "type": "boolean",
@@ -430,7 +431,8 @@
     "test:integration:min": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --vscode-version=min",
     "test": "npm run typecheck && npm run test:unit && npm run test:integration",
     "test:real": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --real",
-    "package": "npm run build -- --production && node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies --allow-missing-repository -o dist-vsix/oh-my-pi.vsix"
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies --allow-missing-repository -o dist-vsix/oh-my-pi.vsix"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

@@ -38,6 +38,11 @@ describe("buildAskAnswers", () => {
 		]);
 	});
 
+	it("lists a label once when two options share it", () => {
+		const twice: AskQuestionView = { id: "env", question: "Where?", options: [{ label: "prod" }, { label: "prod" }, { label: "dev" }], multi: true };
+		assert.deepEqual(buildAskAnswers([twice], [{ selected: ["prod", "dev"], custom: "" }]), [{ id: "env", selectedOptions: ["prod", "dev"] }]);
+	});
+
 	it("emits one entry per question in request order even without state", () => {
 		assert.deepEqual(buildAskAnswers(questions, []), [
 			{ id: "db", selectedOptions: [] },

@@ -81,6 +81,13 @@ describe("listSessions", () => {
 		assert.equal(session.title, "héllo wörld ✓");
 	});
 
+	it("shortens a long first message at 200 characters without splitting one", async () => {
+		const text = `${"a".repeat(199)}😀😀 tail`;
+		write("e.jsonl", [{ type: "session", id: "s-e" }, { type: "message", message: { role: "user", content: text } }], 1000);
+		const [session] = await listSessions(dir, memoryLogger());
+		assert.equal(session.firstMessage, `${"a".repeat(199)}😀…`);
+	});
+
 	it("skips and logs a session file that cannot be read, listing the others", async () => {
 		write("locked.jsonl", [{ type: "session", id: "s-locked" }], 2000);
 		const ok = write("ok.jsonl", [{ type: "session", id: "s-ok" }], 1000);

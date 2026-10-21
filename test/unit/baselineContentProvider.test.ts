@@ -9,8 +9,8 @@ describe("BaselineContentProvider", () => {
 
 	beforeEach(() => stub.reset());
 
-	function provider(baseline: (filePath: string) => string | null | undefined = () => undefined) {
-		return new BaselineContentProvider(baseline, new EventEmitter<vscode.Uri>().event);
+	function provider(baseline: (filePath: string) => string | null | undefined = () => undefined, maxPinnedChars?: number) {
+		return new BaselineContentProvider(baseline, new EventEmitter<vscode.Uri>().event, maxPinnedChars);
 	}
 
 	it("addresses the baseline of a file under its own scheme", () => {
@@ -48,5 +48,20 @@ describe("BaselineContentProvider", () => {
 		const first = docs.pin(file, "first");
 		for (let i = 0; i < 20; i++) docs.pin(file, `pin ${i}`);
 		assert.throws(() => docs.provideTextDocumentContent(first), /no longer available/);
+	});
+
+	it("addresses its pins apart from those of an earlier activation", () => {
+		assert.notEqual(provider().pin(file, "new").toString(), provider().pin(file, "old").toString());
+	});
+
+	it("forgets the oldest pins once their text exceeds the character budget, keeping the newest", () => {
+		const docs = provider(undefined, 10);
+		const first = docs.pin(file, "aaaaaa");
+		const second = docs.pin(file, "bbbbbb");
+		assert.throws(() => docs.provideTextDocumentContent(first), /no longer available/);
+		assert.equal(docs.provideTextDocumentContent(second), "bbbbbb");
+		const large = docs.pin(file, "c".repeat(20));
+		assert.throws(() => docs.provideTextDocumentContent(second), /no longer available/);
+		assert.equal(docs.provideTextDocumentContent(large), "c".repeat(20));
 	});
 });

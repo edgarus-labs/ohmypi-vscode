@@ -117,8 +117,12 @@ export class ChangeModel {
 	private readonly byPath = new PathMap<TrackedChange>();
 	/** Tool calls that started and have not ended. */
 	private readonly running = new Set<string>();
+	/** Reads begun by {@link readAhead}, per tool call and path, until `apply` takes them. */
+	private readonly readsAhead = new Map<string, Map<string, Promise<Snapshot>>>();
 	/** Characters held by `baselines`. */
 	private retainedChars = 0;
+	/** Bumped by `clear`, so an `apply` that was awaiting a read then drops its results. */
+	private generation = 0;
 
 	constructor(
 		private readonly read: ReadSnapshot,
@@ -151,17 +155,38 @@ export class ChangeModel {
 		return this.baselines.get(filePath);
 	}
 
-	/** Forgets everything. */
+	/** Forgets everything, including the results of an `apply` still in progress. */
 	clear(): void {
 		this.baselines.clear();
 		this.baselineSource.clear();
 		this.byPath.clear();
 		this.running.clear();
+		this.readsAhead.clear();
 		this.retainedChars = 0;
+		this.generation++;
 	}
 
+	/**
+	 * Starts reading the files a starting tool names as soon as its event arrives. Events are applied
+	 * one after another, and OMP may write a file while earlier events are still being applied, so a
+	 * read begun only when `apply` reaches the start event could see the tool's own write.
+	 */
+	readAhead(event: ToolExecutionEvent, scope: ChangeScope): void {
+		if (event.phase !== "start" || READ_ONLY_TOOLS.has(event.name)) return;
+		const reads = new Map<string, Promise<Snapshot>>();
+		for (const raw of toolArgPaths(event.args)) {
+			const filePath = resolveToolPath(raw, scope.cwd);
+			if (filePath !== undefined && isWithinRoots(filePath, scope.roots) && !this.baselines.has(filePath)) reads.set(filePath, this.read(filePath));
+		}
+		if (reads.size > 0) this.readsAhead.set(event.toolCallId, reads);
+	}
+
+	/** Applies one tool event; a start event uses the reads {@link readAhead} began for it. */
 	async apply(event: ToolExecutionEvent, scope: ChangeScope): Promise<ApplyResult> {
 		const result: ApplyResult = { changesChanged: false, baselinesChanged: [] };
+		const generation = this.generation;
+		const readsAhead = this.readsAhead.get(event.toolCallId);
+		this.readsAhead.delete(event.toolCallId);
 		if (READ_ONLY_TOOLS.has(event.name)) return result;
 		const resolve = (raw: string): string | undefined => {
 			const filePath = resolveToolPath(raw, scope.cwd);
@@ -176,7 +201,8 @@ export class ChangeModel {
 			this.running.add(event.toolCallId);
 			for (const filePath of argPaths) {
 				if (this.baselines.has(filePath)) continue;
-				const content = await this.read(filePath);
+				const content = await (readsAhead?.get(filePath) ?? this.read(filePath));
+				if (generation !== this.generation) return { changesChanged: false, baselinesChanged: [] };
 				if (content === undefined || !this.admit(filePath, content, result)) continue;
 				this.setBaseline(filePath, content);
 				this.baselineSource.set(filePath, event.toolCallId);
@@ -191,12 +217,15 @@ export class ChangeModel {
 		}
 		for (const [filePath, oldText] of reported) {
 			if (typeof oldText !== "string" || this.baselineSource.get(filePath) !== event.toolCallId) continue;
+			// No file at the start snapshot and an empty `oldText`: the call created the file.
+			if (oldText === "" && this.baselines.get(filePath) === null) continue;
 			this.setBaseline(filePath, oldText);
 			result.baselinesChanged.push(filePath);
 		}
 		const candidates = new Set([...argPaths.filter(p => this.baselines.has(p)), ...reported.keys()]);
 		for (const filePath of candidates) {
 			const current = await this.read(filePath);
+			if (generation !== this.generation) return { changesChanged: false, baselinesChanged: [] };
 			if (current === undefined) continue;
 			if (!this.baselines.has(filePath)) {
 				const oldText = reported.get(filePath);

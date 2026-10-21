@@ -113,10 +113,8 @@ describe("SessionStore transcript", () => {
 		assert.equal(started.kind === "tool" && started.status, "running");
 		apply({ type: "tool_execution_update", toolCallId: "t1", toolName: "edit", partialResult: { content: [{ type: "text", text: "working" }] } });
 		assert.equal(s.transcript[0].kind === "tool" && s.transcript[0].partial, "working");
-		apply({ type: "tool_stream_update", toolCallId: "t1", toolName: "edit", update: "streamed" });
-		assert.equal(s.transcript[0].kind === "tool" && s.transcript[0].partial, "streamed");
-		apply({ type: "tool_stream_update", toolCallId: "t1", toolName: "edit", update: { files: [] } });
-		assert.equal(s.transcript[0].kind === "tool" && s.transcript[0].partial, "streamed", "opaque stream payload keeps text");
+		apply({ type: "tool_stream_update", toolCallId: "t1", toolName: "edit", update: { streaming: true, files: [{ path: "a.ts" }] } });
+		assert.equal(s.transcript[0].kind === "tool" && s.transcript[0].partial, "working", "argument previews are not tool output");
 		const details = { path: "a.ts", oldText: "x", newText: "y", diff: "-x\n+y" };
 		apply({
 			type: "tool_execution_end",
@@ -147,6 +145,51 @@ describe("SessionStore transcript", () => {
 		apply({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: {} });
 		apply({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "exit 1" }] }, isError: true });
 		assert.equal(s.transcript[0].kind === "tool" && s.transcript[0].status, "error");
+	});
+
+	it("ignores argument previews streamed before the tool starts", () => {
+		const { s, apply, changes } = store();
+		apply({ type: "tool_stream_update", toolCallId: "t1", toolName: "edit", update: { streaming: false, files: [{ path: "a.ts" }] } });
+		assert.deepEqual([s.transcript, changes], [[], []]);
+	});
+
+	it("shows a reloaded call that reports progress as running", () => {
+		const { s, apply } = store();
+		s.reset([assistant([{ type: "toolCall", id: "t1", name: "bash", arguments: {} }], { stopReason: "toolUse" })]);
+		apply({ type: "tool_execution_update", toolCallId: "t1", toolName: "bash", partialResult: { content: [{ type: "text", text: "line" }] } });
+		const tool = s.transcript.find(item => item.id === "t1");
+		assert.deepEqual(tool?.kind === "tool" && [tool.status, tool.partial], ["running", "line"]);
+		assert.equal(s.runningTool, "bash");
+	});
+
+	it("closes streaming replies and running tools when the session is interrupted", () => {
+		const { s, apply } = store();
+		apply({ type: "message_start", messageId: "m-1", message: assistant([]) });
+		apply({ type: "message_update", messageId: "m-1", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hal" } });
+		apply({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: {} });
+		apply({ type: "tool_execution_update", toolCallId: "t1", toolName: "bash", partialResult: { content: [{ type: "text", text: "half" }] } });
+		apply({ type: "tool_execution_start", toolCallId: "t2", toolName: "read", args: {} });
+		apply({ type: "tool_execution_end", toolCallId: "t2", toolName: "read", result: { content: [{ type: "text", text: "ok" }] }, isError: false });
+		const finished = s.transcript.find(item => item.id === "t2");
+		s.interrupt("OMP process exited (code 3)");
+		const [reply, interrupted] = s.transcript;
+		assert.deepEqual(reply.kind === "assistant" && [reply.text, reply.streaming], ["Hal", false]);
+		assert.equal(interrupted.kind, "tool");
+		if (interrupted.kind !== "tool") return;
+		assert.equal(interrupted.status, "error");
+		assert.deepEqual(interrupted.result, { text: "Interrupted: OMP process exited (code 3)", isError: true });
+		assert.equal(interrupted.partial, "half");
+		assert.ok(interrupted.endedAt !== undefined);
+		assert.equal(s.transcript.find(item => item.id === "t2"), finished);
+		assert.equal(s.runningTool, undefined);
+	});
+
+	it("leaves an idle transcript untouched when interrupted", () => {
+		const { s, apply, changes } = store();
+		apply({ type: "message_end", messageId: "m-1", message: assistant([{ type: "text", text: "done" }]) });
+		const before = changes.length;
+		s.interrupt("OMP was stopped");
+		assert.equal(changes.length, before);
 	});
 
 	it("keeps the auto selector apart from the effort it resolves to", () => {
@@ -270,6 +313,26 @@ describe("historyToItems", () => {
 			assistant([{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "sleep 100" } }], { timestamp: 7 }),
 		]);
 		assert.deepEqual(items[1], { kind: "tool", id: "t1", name: "bash", args: { command: "sleep 100" }, status: "unresolved", startedAt: 7 });
+	});
+
+	it("shows the unresolved calls of a running agent's last reply as running", () => {
+		const messages: AgentMessage[] = [
+			assistant([{ type: "toolCall", id: "t1", name: "read", arguments: {} }], { stopReason: "toolUse" }),
+			assistant([{ type: "toolCall", id: "t2", name: "bash", arguments: {} }], { stopReason: "toolUse" }),
+		];
+		const statuses = (items: TranscriptItem[]) => items.flatMap(item => (item.kind === "tool" ? [item.status] : []));
+		assert.deepEqual(statuses(historyToItems(messages, { running: true })), ["unresolved", "running"]);
+		assert.deepEqual(statuses(historyToItems(messages)), ["unresolved", "unresolved"]);
+	});
+
+	it("shows where the conversation was compacted", () => {
+		const items = historyToItems([
+			{ role: "compactionSummary", summary: "Long summary", shortSummary: "Fixed the parser", tokensBefore: 90_000, timestamp: 1 },
+			{ role: "user", content: "next", timestamp: 2 },
+		]);
+		assert.deepEqual(items[0], { kind: "notice", id: "h0", level: "info", text: "Earlier messages were compacted into a summary: Fixed the parser" });
+		const long = historyToItems([{ role: "compactionSummary", summary: "Long summary", tokensBefore: 1, timestamp: 1 }]);
+		assert.equal(long[0].kind === "notice" && long[0].text, "Earlier messages were compacted into a summary: Long summary");
 	});
 
 	it("resets the store transcript and cost from history", () => {

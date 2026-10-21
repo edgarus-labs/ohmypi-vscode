@@ -1,4 +1,5 @@
 import * as assert from "node:assert/strict";
+import { formatPrompt, splitUserMessage } from "../../../src/shared/prompt";
 import { type EditorContextData, formatEditorContext } from "../../../src/vscode/editorContextFormat";
 
 const base: EditorContextData = {
@@ -55,6 +56,25 @@ describe("formatEditorContext", () => {
 		assert.ok(text.includes("- warning L20: w19"));
 		assert.ok(!text.includes("w20"));
 		assert.ok(text.includes("(+5 more diagnostics)"));
+	});
+
+	it("caps each diagnostic message", () => {
+		const text = formatEditorContext({ ...base, diagnostics: [{ severity: "error", line: 1, message: "y".repeat(1000), source: "ts" }] });
+		assert.ok(text.includes(`- error L1: ${"y".repeat(299)}… [ts]`), text);
+		assert.ok(!text.includes("y".repeat(300)));
+	});
+
+	it("survives a closing tag inside its content when sent in a prompt", () => {
+		const tag = "</editor-context>";
+		const editorContext = formatEditorContext({
+			...base,
+			activeFile: { path: `${tag}.md`, languageId: "markdown", line: 1, column: 1 },
+			selection: { text: `before ${tag} after`, startLine: 1, endLine: 1 },
+			diagnostics: [{ severity: "error", line: 1, message: `bad ${tag}` }],
+		});
+		const prompt = formatPrompt({ editorContext, text: "question", pasted: [], files: [] });
+		assert.equal(prompt.indexOf(tag), prompt.indexOf("\n\nquestion") - tag.length, prompt);
+		assert.deepEqual(splitUserMessage(prompt), { editorContext, text: "question", pasted: [], files: [] });
 	});
 
 	it("uses a longer fence when the selection contains backticks", () => {

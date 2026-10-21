@@ -2,7 +2,7 @@ import * as assert from "node:assert/strict";
 import {
 	changedSpans,
 	cutTo,
-	diffLineClass,
+	diffLineClasses,
 	findMarks,
 	flatArgs,
 	looksLikeDiff,
@@ -137,13 +137,13 @@ describe("findMarks", () => {
 	});
 });
 
-describe("diffLineClass", () => {
+describe("diffLineClasses", () => {
 	it("classifies unified diff lines", () => {
-		assert.equal(diffLineClass("+added"), "add");
-		assert.equal(diffLineClass("-removed"), "del");
-		assert.equal(diffLineClass("@@ -1 +1 @@"), "hunk");
-		assert.equal(diffLineClass("+++ b/file"), "meta");
-		assert.equal(diffLineClass("--- a/file"), "meta");
-		assert.equal(diffLineClass(" ctx"), "ctx");
+		assert.deepEqual(diffLineClasses(["--- a/file", "+++ b/file", "@@ -1 +1 @@", " ctx", "-removed", "+added"]), ["meta", "meta", "hunk", "ctx", "del", "add"]);
+	});
+
+	it("treats --- and +++ as a file header only as a pair, so removed `--` and added `++` lines keep their color", () => {
+		assert.deepEqual(diffLineClasses(["@@ -1,2 +1,2 @@", "--- old comment", "-x", "+++i;", "+y"]), ["hunk", "del", "del", "add", "add"]);
+		assert.deepEqual(diffLineClasses(["---", " key: 1"]), ["del", "ctx"]);
 	});
 });

@@ -14,6 +14,8 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const LINE_BREAK = /\r\n|\r|\n/g;
+
 export function agentSummaryMarkdown(agent: AgentView, now: number): string {
 	const rows: Array<[string, string | undefined]> = [
 		["id", `\`${agent.id}\``],
@@ -29,9 +31,9 @@ export function agentSummaryMarkdown(agent: AgentView, now: number): string {
 		["session file", agent.sessionFile && `\`${agent.sessionFile}\``],
 		["error", agent.error],
 	];
-	const lines = [`# ${agent.name}`, "", "| field | value |", "| --- | --- |"];
+	const lines = [`# ${agent.name.replace(LINE_BREAK, " ")}`, "", "| field | value |", "| --- | --- |"];
 	for (const [field, value] of rows) {
-		if (value) lines.push(`| ${field} | ${value.replace(/\|/g, "\\|").replace(/\n/g, " ")} |`);
+		if (value) lines.push(`| ${field} | ${value.replace(/\|/g, "\\|").replace(LINE_BREAK, " ")} |`);
 	}
 	return `${lines.join("\n")}\n`;
 }

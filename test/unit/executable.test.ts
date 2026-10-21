@@ -59,6 +59,25 @@ describe("resolveExecutable", () => {
 		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\bin\\omp", "C:\\tools\\omp.cmd")), "C:\\tools\\omp.cmd");
 	});
 
+	it("strips the quotes Windows allows around a Path entry", () => {
+		const winEnv = { USERPROFILE: "C:\\Users\\u", Path: 'C:\\bin;"C:\\Program Files\\omp";"D:\\a;b";C:\\tools' };
+		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\Program Files\\omp\\omp.exe")), "C:\\Program Files\\omp\\omp.exe");
+		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("D:\\a;b\\omp.cmd")), "D:\\a;b\\omp.cmd");
+	});
+
+	it("expands ~\\ in a configured win32 path under USERPROFILE and keeps spaces", () => {
+		const winEnv = { USERPROFILE: "C:\\Users\\John Doe", HOME: "D:\\elsewhere" };
+		const expected = "C:\\Users\\John Doe\\AppData\\Local\\omp\\omp.exe";
+		assert.equal(resolveExecutable("~\\AppData\\Local\\omp\\omp.exe", winEnv, "win32", fsWith(expected)), expected);
+		assert.equal(resolveExecutable("~/AppData/Local/omp/omp.exe", winEnv, "win32", fsWith(expected)), expected);
+	});
+
+	it("falls back to HOME on win32 when USERPROFILE is unset", () => {
+		const winEnv = { HOME: "C:\\Users\\u", Path: "" };
+		assert.equal(resolveExecutable("", winEnv, "win32", fsWith("C:\\Users\\u\\.bun\\bin\\omp.exe")), "C:\\Users\\u\\.bun\\bin\\omp.exe");
+		assert.equal(resolveExecutable("~\\bin\\omp.cmd", winEnv, "win32", fsWith("C:\\Users\\u\\bin\\omp.cmd")), "C:\\Users\\u\\bin\\omp.cmd");
+	});
+
 	it("lists every location tried when nothing is found", () => {
 		assert.throws(
 			() => resolveExecutable("", env, "linux", fsWith()),

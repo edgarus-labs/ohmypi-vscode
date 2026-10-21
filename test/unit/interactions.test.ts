@@ -110,6 +110,38 @@ describe("InteractionController", () => {
 		assert.deepEqual(surface.closed, ["c1"]);
 	});
 
+	it("ignores an answer that does not fit the request and keeps the request open", () => {
+		service.requests.fire(confirm);
+		service.requests.fire({ id: "s1", kind: "select", title: "Pick", options: [{ label: "a" }] });
+		service.requests.fire({ id: "q1", kind: "ask", questions: [] });
+		for (const [id, response] of [
+			["c1", { kind: "value", value: "yes" }],
+			["c1", { kind: "confirmed", confirmed: "yes" }],
+			["c1", null],
+			["s1", { kind: "value", value: "not offered" }],
+			["s1", { kind: "confirmed", confirmed: true }],
+			["q1", { kind: "answers", answers: "all" }],
+			["q1", { kind: "approve" }],
+		] as const) {
+			controller.respond(id, response as unknown as InteractionResponse);
+		}
+		assert.deepEqual(service.answers, []);
+		assert.deepEqual(
+			controller.list().map(pending => pending.request.id),
+			["c1", "s1", "q1"],
+		);
+		assert.equal(logger.text("warn").split("\n").filter(line => line.includes("does not fit")).length, 7, logger.text("warn"));
+
+		controller.respond("s1", { kind: "value", value: "a" });
+		controller.respond("c1", { kind: "cancelled" });
+		controller.respond("q1", { kind: "answers", answers: [] });
+		assert.deepEqual(service.answers, [
+			["s1", { kind: "value", value: "a" }],
+			["c1", { kind: "cancelled" }],
+			["q1", { kind: "answers", answers: [] }],
+		]);
+	});
+
 	it("records the expiry of a request with a timeout", () => {
 		const before = Date.now();
 		service.requests.fire({ ...confirm, timeoutMs: 5000 });
@@ -251,21 +283,21 @@ describe("PresentationHandler", () => {
 		assert.deepEqual(stub.callsTo("window.showInformationMessage"), []);
 	});
 
-	it("opens a web URL only after the user chooses Open", async () => {
+	it("opens a web URL exactly as OMP sent it, only after the user chooses Open", async () => {
 		stub.on("window.showInformationMessage", () => undefined);
 		service.presentations.fire({ kind: "openUrl", url: "https://example.com/login" });
 		await tick();
 		assert.deepEqual(stub.callsTo("env.openExternal"), []);
 
 		stub.on("window.showInformationMessage", () => "Open");
-		service.presentations.fire({ kind: "openUrl", url: "https://example.com/login", instructions: "Sign in" });
+		const url = "https://auth.example.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fcb&state=a%2Bb%26c";
+		service.presentations.fire({ kind: "openUrl", url, instructions: "Sign in" });
 		await tick();
 		const [message, options] = stub.callsTo("window.showInformationMessage")[1] as [string, { modal: boolean; detail: string }];
 		assert.equal(message, "OMP wants to open a URL in your browser.");
 		assert.equal(options.modal, true);
-		assert.equal(options.detail, "Sign in\n\nhttps://example.com/login");
-		const [opened] = stub.callsTo("env.openExternal")[0] as [Uri];
-		assert.equal(opened.toString(), "https://example.com/login");
+		assert.equal(options.detail, `Sign in\n\n${url}`);
+		assert.deepEqual(stub.callsTo("env.openExternal"), [[url]]);
 	});
 
 	it("creates, updates and removes status items by key", async () => {

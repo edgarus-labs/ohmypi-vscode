@@ -1,5 +1,6 @@
 import * as assert from "node:assert/strict";
 import { ChunkReassembler, JsonlDecoder } from "../../src/omp/jsonl";
+import { isRecord } from "../../src/shared/guards";
 
 function collect() {
 	const values: unknown[] = [];
@@ -66,9 +67,47 @@ describe("JsonlDecoder", () => {
 		assert.equal(errors.length, 1);
 		assert.match(errors[0].message, /exceeds/);
 	});
+
+	it("accepts a line of exactly maxLineBytes and drops one byte more", () => {
+		const values: unknown[] = [];
+		const errors: Error[] = [];
+		const decoder = new JsonlDecoder({ value: v => values.push(v), error: e => errors.push(e) }, 16);
+		decoder.push(Buffer.from(`{"a":"${"x".repeat(8)}"}\n`));
+		decoder.push(Buffer.from(`{"a":"${"x".repeat(9)}"}\n`));
+		assert.deepEqual(values, [{ a: "x".repeat(8) }]);
+		assert.equal(errors.length, 1);
+	});
+
+	it("forgets a line being dropped when end() is called", () => {
+		const values: unknown[] = [];
+		const errors: Error[] = [];
+		const decoder = new JsonlDecoder({ value: v => values.push(v), error: e => errors.push(e) }, 16);
+		decoder.push(Buffer.from('{"long":"aaaaaaaaaaaaaaaaaaaa'));
+		decoder.end();
+		decoder.push(Buffer.from('{"b":2}\n'));
+		assert.deepEqual(values, [{ b: 2 }]);
+		assert.equal(errors.length, 1);
+	});
+
+	it("reports a value handler failure and keeps decoding the rest of the chunk", () => {
+		const values: unknown[] = [];
+		const errors: Error[] = [];
+		const decoder = new JsonlDecoder({
+			value: v => {
+				if (isRecord(v) && v.a === 1) throw new Error("listener broke");
+				values.push(v);
+			},
+			error: e => errors.push(e),
+		});
+		decoder.push(Buffer.from('{"a":1}\n{"b":2}\n{"c":'));
+		decoder.push(Buffer.from("3}\n"));
+		assert.deepEqual(values, [{ b: 2 }, { c: 3 }]);
+		assert.equal(errors.length, 1);
+		assert.match(errors[0].message, /listener broke/);
+	});
 });
 
-const LIMITS = { maxFrameBytes: 16, maxReassembledFrameBytes: 1024 };
+const LIMITS = { maxFrameBytes: 16, maxReassembledFrameBytes: 1024, maxChunkPayloadBytes: 16 };
 
 function chunkFrames(frame: object, size: number, chunkId = "rpc-1") {
 	const bytes = Buffer.from(JSON.stringify(frame));
@@ -155,5 +194,38 @@ describe("ChunkReassembler", () => {
 		}));
 		const results = chunks.map(c => r.push(c));
 		assert.ok(results[1].error);
+	});
+
+	it("rejects more chunks than the reassembly limit allows at the largest chunk payload", () => {
+		const r = new ChunkReassembler(LIMITS);
+		const [first] = chunkFrames({ type: "x", pad: "0123456789abcdef" }, 8);
+		assert.deepEqual(r.push({ ...first, count: 64 }), {});
+		assert.match(new ChunkReassembler(LIMITS).push({ ...first, count: 65 }).error!.message, /metadata/);
+	});
+
+	it("rejects a chunk payload above the chunk payload limit even within the frame limit", () => {
+		const r = new ChunkReassembler({ maxFrameBytes: 64, maxReassembledFrameBytes: 1024, maxChunkPayloadBytes: 16 });
+		const [first] = chunkFrames({ type: "x", pad: "0123456789abcdef".repeat(8) }, 17);
+		assert.match(r.push(first).error!.message, /payload/);
+	});
+
+	it("rejects base64 that is not in canonical form", () => {
+		const r = new ChunkReassembler(LIMITS);
+		const [first] = chunkFrames({ type: "x", pad: "0123456789abcdef" }, 7);
+		const canonical = first.data;
+		assert.ok(canonical.endsWith("=="), "the fixture chunk ends in one byte of a final group");
+		assert.deepEqual(new ChunkReassembler(LIMITS).push(first), {});
+		assert.ok(r.push({ ...first, data: canonical.replace(/=+$/, "") }).error, "missing padding");
+		assert.ok(r.push({ ...first, data: `${canonical.slice(0, -3)}${String.fromCharCode(canonical.charCodeAt(canonical.length - 3) + 1)}==` }).error, "non-zero trailing bits");
+		assert.ok(r.push({ ...first, data: canonical.replace(/\+/g, "-").replace(/\//g, "_").replace(/^(.)/, "-") }).error, "URL-safe alphabet");
+		assert.ok(r.push({ ...first, data: ` ${canonical}` }).error, "whitespace");
+	});
+
+	it("accepts a chunk whose base64 text is several megabytes long", () => {
+		const payload = 3.5 * 1024 * 1024;
+		const r = new ChunkReassembler({ maxFrameBytes: 8 * 1024 * 1024, maxReassembledFrameBytes: 64 * 1024 * 1024, maxChunkPayloadBytes: payload });
+		const frame = { type: "big", pad: "z".repeat(8 * 1024 * 1024) };
+		const results = chunkFrames(frame, payload).map(c => r.push(c));
+		assert.deepEqual(results.at(-1), { frame });
 	});
 });

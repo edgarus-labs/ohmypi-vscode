@@ -18,13 +18,22 @@ function webviewTabs(): vscode.Tab[] {
 const workspace = process.env.OMP_IT_WORKSPACE!;
 const fakeLog = process.env.FAKE_OMP_LOG!;
 
-function sentCommands(): Array<Record<string, unknown>> {
+/**
+ * Commands fake OMP logged, in order; the log spans the whole suite, so an action's
+ * commands are those after the {@link logMark} taken just before it.
+ */
+function sentCommands(since = 0): Array<Record<string, unknown>> {
 	if (!fs.existsSync(fakeLog)) return [];
 	return fs
 		.readFileSync(fakeLog, "utf8")
 		.split("\n")
 		.filter(Boolean)
+		.slice(since)
 		.map(line => JSON.parse(line) as Record<string, unknown>);
+}
+
+function logMark(): number {
+	return sentCommands().length;
 }
 
 /**
@@ -102,27 +111,30 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await vscode.commands.executeCommand("omp.addFileToChat", sample);
 		await vscode.commands.executeCommand("omp.addFileToChat", other);
 		await until("file chips", () => api.chat.lastRendered?.attachments?.join(",") === "sample.txt,settings.json");
+		const mark = logMark();
 		const outcome = await api.chat.send("compare these", "auto", false, [
 			{ id: "a", kind: "file", path: sample.fsPath, label: "sample.txt" },
 			{ id: "b", kind: "file", path: other.fsPath, label: "settings.json" },
 		]);
 		assert.equal(outcome.status, "completed");
-		assert.ok(sentCommands().some(c => c.type === "prompt" && c.message === `compare these\n\nAttached: @sample.txt @${path.join(".vscode", "settings.json")}`));
+		assert.ok(sentCommands(mark).some(c => c.type === "prompt" && c.message === `compare these\n\nAttached: @sample.txt @${path.join(".vscode", "settings.json")}`));
 	});
 
 	it("toggles fast mode through OMP", async () => {
 		const before = api.service.session.fastModeEnabled === true;
+		const mark = logMark();
 		await vscode.commands.executeCommand("omp.toggleFastMode");
 		await until("fast mode toggled", () => api.service.session.fastModeEnabled === !before);
-		assert.ok(sentCommands().some(c => c.type === "set_fast_mode" && c.enabled === !before));
+		assert.ok(sentCommands(mark).some(c => c.type === "set_fast_mode" && c.enabled === !before));
 		await vscode.commands.executeCommand("omp.toggleFastMode");
 		await until("fast mode restored", () => api.service.session.fastModeEnabled === before);
 	});
 
 	it("renames the session through OMP", async () => {
+		const mark = logMark();
 		await vscode.commands.executeCommand("omp.renameSession", "Refactor parser");
 		assert.equal(api.service.session.sessionName, "Refactor parser");
-		assert.ok(sentCommands().some(c => c.type === "set_session_name" && c.name === "Refactor parser"));
+		assert.ok(sentCommands(mark).some(c => c.type === "set_session_name" && c.name === "Refactor parser"));
 	});
 
 	it("activates, spawns OMP, completes the RPC handshake and creates a session", async () => {
@@ -139,9 +151,10 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		const models = await api.service.listModels();
 		assert.ok(models.length >= 2);
 		const target = models.find(m => m.id !== api.service.session.model?.id)!;
+		const mark = logMark();
 		await api.service.setModel(target.provider, target.id);
 		await until("model change", () => api.service.session.model?.id === target.id);
-		assert.ok(sentCommands().some(c => c.type === "set_model" && c.modelId === target.id));
+		assert.ok(sentCommands(mark).some(c => c.type === "set_model" && c.modelId === target.id));
 	});
 
 	it("streams assistant output and renders the new reply", async () => {
@@ -251,9 +264,10 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		const request = await pending;
 		assert.equal(request.kind, "confirm");
 		await until("interaction rendered", () => api.chat.lastRendered?.interactions.includes(request.id));
+		const mark = logMark();
 		api.service.respondInteraction(request.id, { kind: "confirmed", confirmed: true });
 		await done;
-		assert.ok(sentCommands().some(c => c.type === "extension_ui_response" && c.id === request.id && c.confirmed === true));
+		assert.ok(sentCommands(mark).some(c => c.type === "extension_ui_response" && c.id === request.id && c.confirmed === true));
 	});
 
 	it("aborts a running turn on cancellation", async () => {
@@ -290,10 +304,11 @@ describe("oh-my-pi extension (fake OMP)", () => {
 		await until("new file", () => api.service.session.sessionFile && api.service.session.sessionFile !== first);
 		const sessions = await api.service.listSessions();
 		assert.ok(sessions.some(s => s.path === first));
+		const mark = logMark();
 		await api.service.switchSession(first);
 		await until("switched back", () => api.service.session.sessionFile === first);
 		assert.ok(api.service.transcript.some(i => i.kind === "user"));
-		assert.ok(sentCommands().some(c => c.type === "switch_session" && c.sessionPath === first));
+		assert.ok(sentCommands(mark).some(c => c.type === "switch_session" && c.sessionPath === first));
 	});
 
 	it("offers the newest other saved sessions to the chat when the session changes", async () => {

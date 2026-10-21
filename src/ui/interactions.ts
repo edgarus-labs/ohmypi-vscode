@@ -1,8 +1,36 @@
 import * as vscode from "vscode";
 import type { Disposable, InteractionRequest, InteractionResponse, Logger, OmpServiceApi, PresentationRequest } from "../omp/api";
 import { errorMessage } from "../shared/errors";
+import { isRecord } from "../shared/guards";
 import { statusDisplayText } from "../shared/router";
 import type { PendingInteraction } from "../webview/protocol";
+
+/**
+ * Opens a web or mail link exactly as written. `env.openExternal` also accepts the URL as a string;
+ * a `vscode.Uri` would decode and re-encode the query, which changes escaped values such as `%2B` or `%26`.
+ */
+export function openExternalUrl(url: string): Thenable<boolean> {
+	return vscode.env.openExternal(url as unknown as vscode.Uri);
+}
+
+/** Whether `response` answers `request`: a cancellation answers every request, anything else only its own kind. */
+function answers(request: InteractionRequest, response: unknown): response is InteractionResponse {
+	if (!isRecord(response)) return false;
+	switch (response.kind) {
+		case "cancelled":
+			return true;
+		case "confirmed":
+			return request.kind === "confirm" && typeof response.confirmed === "boolean";
+		case "value":
+			if (typeof response.value !== "string") return false;
+			if (request.kind === "select") return request.options.some(option => option.label === response.value);
+			return request.kind === "input" || request.kind === "editor";
+		case "answers":
+			return request.kind === "ask" && Array.isArray(response.answers);
+		default:
+			return false;
+	}
+}
 
 /** The conversation panel as seen by interaction/presentation handling. */
 export interface InteractionSurface {
@@ -54,6 +82,10 @@ export class InteractionController implements vscode.Disposable {
 		const entry = this.entries.get(id);
 		if (!entry || !this.service) {
 			this.logger.debug(`Ignoring answer for interaction ${id}: no longer pending`);
+			return;
+		}
+		if (!answers(entry.pending.request, response)) {
+			this.logger.warn(`Ignoring an answer that does not fit interaction ${id} (${entry.pending.request.kind})`);
 			return;
 		}
 		try {
@@ -215,7 +247,7 @@ export class PresentationHandler implements vscode.Disposable {
 				}
 				const detail = request.instructions ? `${request.instructions}\n\n${request.url}` : request.url;
 				const choice = await vscode.window.showInformationMessage("OMP wants to open a URL in your browser.", { modal: true, detail }, "Open");
-				if (choice === "Open") await vscode.env.openExternal(uri);
+				if (choice === "Open") await openExternalUrl(request.url);
 				return;
 			}
 			case "editorText":

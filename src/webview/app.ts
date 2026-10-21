@@ -91,7 +91,11 @@ export function startWebviewApp(api: VsCodeApi, root: HTMLElement): WebviewApp {
 		header.element,
 		banner.element,
 		scroll.element,
-		h("div", { class: "dock" }, h("div", { class: "dock-inner" }, panel.statusLine, panel.queue, panel.todos, interactions.element, composer.element)),
+		h(
+			"div",
+			{ class: "dock" },
+			h("div", { class: "dock-inner" }, h("div", { class: "dock-stack" }, panel.statusLine, panel.queue, panel.todos, interactions.element), composer.element),
+		),
 		liveRegion,
 	);
 	listenForLinks(root, post);
@@ -165,7 +169,10 @@ export function startWebviewApp(api: VsCodeApi, root: HTMLElement): WebviewApp {
 		unavailable = message.unavailable;
 		state.setHostDefault(message.includeEditorContext);
 		step(() => transcript.reset(message.items));
-		interactions.clear();
+		const lostImages = state.takeLostImages();
+		if (lostImages.length > 0) step(() => notice("warning", `The chat reloaded and did not keep these attached images; attach them again: ${lostImages.join(", ")}.`));
+		const pendingIds = new Set(message.interactions.map(pending => pending.request.id));
+		for (const id of interactions.ids()) if (!pendingIds.has(id)) interactions.remove(id);
 		for (const pending of message.interactions) step(() => interactions.add(pending));
 		step(() => banner.render(unavailable));
 		step(() => applyStatuses(message.statuses));

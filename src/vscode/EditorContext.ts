@@ -23,9 +23,13 @@ function gitChanges(logger: Logger): string[] | undefined {
 	}
 }
 
-/** Collects the editor state attached to prompts. Reads no file contents except the selection; lists only open editors inside a workspace folder. */
+/**
+ * Collects the editor state attached to prompts. Reads no file contents except the selection; describes
+ * the active editor and lists open editors only for documents inside a workspace folder.
+ */
 function gatherEditorContext(logger: Logger): EditorContextData {
-	const editor = vscode.window.activeTextEditor;
+	const activeEditor = vscode.window.activeTextEditor;
+	const editor = activeEditor && vscode.workspace.getWorkspaceFolder(activeEditor.document.uri) ? activeEditor : undefined;
 	const activeUri = editor?.document.uri.toString();
 	const data: EditorContextData = {
 		workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),

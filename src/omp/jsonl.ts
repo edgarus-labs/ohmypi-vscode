@@ -1,11 +1,12 @@
+import { errorMessage } from "../shared/errors";
 import { isRecord } from "../shared/guards";
 
 const NEWLINE = 0x0a;
 /** Line ceiling until the server advertises its frame limit, and for servers that never do. */
 const DEFAULT_MAX_LINE_BYTES = 8 * 1024 * 1024;
-const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export interface JsonlHandlers {
+	/** A decoded line; an exception thrown here is reported through `error` and decoding continues. */
 	value(value: unknown): void;
 	/** A line could not be decoded; decoding continues with the next line. */
 	error(error: Error): void;
@@ -95,7 +96,11 @@ export class JsonlDecoder {
 			this.handlers.error(new Error(`Malformed JSONL line (${(error as Error).message}): ${preview}`));
 			return;
 		}
-		this.handlers.value(value);
+		try {
+			this.handlers.value(value);
+		} catch (error) {
+			this.handlers.error(new Error(`JSONL value handler failed: ${errorMessage(error)}`, { cause: error }));
+		}
 	}
 }
 
@@ -104,11 +109,18 @@ export interface ChunkLimits {
 	maxFrameBytes: number;
 	/** Logical frame ceiling advertised by `ready.maxReassembledFrameBytes`. */
 	maxReassembledFrameBytes: number;
+	/**
+	 * Largest decoded payload of one `rpc_chunk`. OMP splits frames into 256 KiB
+	 * payloads without advertising the size; it also bounds the chunk count to
+	 * `ceil(maxReassembledFrameBytes / maxChunkPayloadBytes)`.
+	 */
+	maxChunkPayloadBytes: number;
 }
 
 export const DEFAULT_CHUNK_LIMITS: ChunkLimits = {
 	maxFrameBytes: 1024 * 1024,
 	maxReassembledFrameBytes: 64 * 1024 * 1024,
+	maxChunkPayloadBytes: 256 * 1024,
 };
 
 interface PendingChunks {
@@ -128,8 +140,10 @@ export interface ReassemblyResult {
 }
 
 /**
- * Protocol v2 `rpc_chunk` reassembler applying the validation rules of OMP's
- * `RpcFrameDecoder`. A rejected sequence is dropped and decoding continues.
+ * Protocol v2 `rpc_chunk` reassembler applying the chunk checks of OMP's
+ * `RpcFrameDecoder`. Unlike OMP, which fails on a chunk sequence interrupted by
+ * another frame, it drops the sequence, delivers the interrupting frame and
+ * reports the error. Any rejected sequence is dropped and decoding continues.
  */
 export class ChunkReassembler {
 	#pending: PendingChunks | undefined;
@@ -167,19 +181,24 @@ export class ChunkReassembler {
 		const i = index as number;
 		const n = count as number;
 		const length = byteLength as number;
+		const { maxFrameBytes, maxReassembledFrameBytes, maxChunkPayloadBytes } = this.limits;
 		if (
 			i < 0 ||
 			n < 2 ||
+			n > Math.ceil(maxReassembledFrameBytes / maxChunkPayloadBytes) ||
 			i >= n ||
-			length < this.limits.maxFrameBytes ||
-			length > this.limits.maxReassembledFrameBytes
+			length < maxFrameBytes ||
+			length > maxReassembledFrameBytes
 		)
 			throw new Error("Invalid RPC chunk metadata");
+		const maxPayload = Math.min(maxFrameBytes, maxChunkPayloadBytes);
 		const data = value.data;
-		if (typeof data !== "string" || data.length === 0 || !BASE64_PATTERN.test(data))
-			throw new Error("Invalid RPC chunk data");
+		if (typeof data !== "string" || data.length === 0) throw new Error("Invalid RPC chunk data");
+		if (data.length > Math.ceil(maxPayload / 3) * 4) throw new Error("RPC chunk payload exceeds the transport limit");
 		const bytes = Buffer.from(data, "base64");
-		if (bytes.length > this.limits.maxFrameBytes) throw new Error("RPC chunk payload exceeds the transport limit");
+		// Node skips characters outside the alphabet and tolerates missing padding; only canonical text survives the round trip.
+		if (bytes.toString("base64") !== data) throw new Error("Invalid RPC chunk data");
+		if (bytes.length > maxPayload) throw new Error("RPC chunk payload exceeds the transport limit");
 
 		if (!this.#pending) {
 			if (i !== 0) throw new Error("RPC chunk sequence must start at index 0");

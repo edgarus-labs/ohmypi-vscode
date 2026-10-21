@@ -7,6 +7,7 @@ import type {
 	AgentMessage,
 	AssistantMessage,
 	BashExecutionMessage,
+	CompactionSummaryMessage,
 	MessageContent,
 	SessionEvent,
 	SessionState,
@@ -83,7 +84,7 @@ function toolResultView(result: unknown, isError: boolean | undefined): ToolResu
 	return view;
 }
 
-/** Text carried by a `tool_execution_update.partialResult` or `tool_stream_update.update`, if any. */
+/** Text carried by a `tool_execution_update.partialResult`, if any. */
 function partialText(payload: unknown): string | undefined {
 	if (typeof payload === "string") return payload;
 	if (isRecord(payload) && Array.isArray(payload.content)) return textOf(payload.content);
@@ -93,12 +94,14 @@ function partialText(payload: unknown): string | undefined {
 /**
  * Map a stored conversation (`get_messages`, `get_subagent_messages`) into
  * transcript items. Tool calls become tool items completed by their results;
- * each finished turn is followed by its summary.
+ * each finished turn is followed by its summary. `running`: the agent is still
+ * at work, so the calls of its last reply that have no result yet are running.
  */
-export function historyToItems(messages: readonly AgentMessage[]): TranscriptItem[] {
+export function historyToItems(messages: readonly AgentMessage[], options: { running?: boolean } = {}): TranscriptItem[] {
 	const items: TranscriptItem[] = [];
 	const tools = new Map<string, number>();
 	const turns = new StoredTurns();
+	let lastCalls: number[] = [];
 	messages.forEach((message, index) => {
 		const id = `h${index}`;
 		switch (message.role) {
@@ -112,10 +115,12 @@ export function historyToItems(messages: readonly AgentMessage[]): TranscriptIte
 			case "assistant": {
 				const assistant = message as AssistantMessage;
 				items.push(assistantItem(id, assistant, false));
+				lastCalls = [];
 				for (const block of assistant.content ?? []) {
 					if (block.type !== "toolCall") continue;
 					const call = block as ToolCall;
 					tools.set(call.id, items.length);
+					lastCalls.push(items.length);
 					items.push({
 						kind: "tool",
 						id: call.id,
@@ -148,8 +153,24 @@ export function historyToItems(messages: readonly AgentMessage[]): TranscriptIte
 				items.push({ kind: "command_output", id, text: `$ ${bash.command}\n${bash.output}` });
 				return;
 			}
+			case "compactionSummary": {
+				const compaction = message as CompactionSummaryMessage;
+				items.push({
+					kind: "notice",
+					id,
+					level: "info",
+					text: `Earlier messages were compacted into a summary: ${compaction.shortSummary || compaction.summary}`,
+				});
+				return;
+			}
 		}
 	});
+	if (options.running) {
+		for (const at of lastCalls) {
+			const call = items[at] as ToolItem;
+			if (call.status === "unresolved") items[at] = { ...call, status: "running" };
+		}
+	}
 	return turns.withSummaries(items);
 }
 
@@ -322,6 +343,25 @@ export class SessionStore {
 		this.#add({ kind: "command_output", id: this.#nextLocalId("output"), text });
 	}
 
+	/** The process went away: streaming replies stop streaming and running tools fail with `Interrupted: <reason>`. */
+	interrupt(reason: string): void {
+		this.#cursors.clear();
+		const endedAt = Date.now();
+		for (const item of this.#items) {
+			if (item.kind === "assistant" && item.streaming) this.#set({ ...item, streaming: false });
+			else if (item.kind === "tool" && item.status === "running") {
+				this.#set({ ...item, status: "error", result: { text: `Interrupted: ${reason}`, isError: true }, endedAt });
+			}
+		}
+	}
+
+	dispose(): void {
+		this.#changeSession.dispose();
+		this.#changeItem.dispose();
+		this.#reset.dispose();
+		this.#toolExecution.dispose();
+	}
+
 	applyEvent(event: SessionEvent): void {
 		switch (event.type) {
 			case "agent_start": {
@@ -346,11 +386,6 @@ export class SessionStore {
 					...(event.args !== undefined ? { args: event.args } : {}),
 					...(text !== undefined ? { partial: text } : {}),
 				});
-				return;
-			}
-			case "tool_stream_update": {
-				const text = partialText(event.update);
-				if (text !== undefined) this.#patchTool(event.toolCallId, { partial: text });
 				return;
 			}
 			case "tool_execution_end":
@@ -543,10 +578,11 @@ export class SessionStore {
 		this.#toolExecution.fire({ phase: "start", toolCallId, name, args });
 	}
 
+	/** A live update of a call; a reloaded call without a result is running after all. */
 	#patchTool(toolCallId: string, patch: Partial<ToolItem>): void {
 		const existing = this.#get(toolCallId);
 		if (existing?.kind !== "tool") return;
-		this.#set({ ...existing, ...patch });
+		this.#set({ ...existing, ...patch, ...(existing.status === "unresolved" ? { status: "running" } : {}) });
 	}
 
 	#applyToolEnd(toolCallId: string, name: string, rawResult: unknown, isError: boolean | undefined): void {

@@ -92,4 +92,29 @@ describe("Composer", () => {
 		assert.equal(composer.attachmentLabels.length, 8);
 		assert.deepEqual(notices, ["warning: Image p8.png was not attached: at most 8 images per prompt."]);
 	});
+
+	it("sends only once the pasted images have been read, with them", async () => {
+		type("look");
+		composer.input.dispatchEvent(event("paste", { clipboardData: { files: [pngFile("a.png")], getData: () => "" } }));
+		assert.equal(sendButton()?.hasAttribute("disabled"), true);
+		click(sendButton());
+		assert.equal(api.postedOf("send").length, 0);
+		await settle();
+		click(sendButton());
+		assert.deepEqual(
+			api.postedOf("send").map(send => send.attachments.map(attachment => attachment.label)),
+			[["a.png"]],
+		);
+	});
+
+	it("attaches the image of a paste and keeps the text pasted with it", async () => {
+		const files = [pngFile("a.png")];
+		const short = event("paste", { clipboardData: { files, getData: (format: string) => (format === "text/plain" ? "caption" : "") } });
+		composer.input.dispatchEvent(short);
+		assert.equal(short.defaultPrevented, false);
+		const long = "line\n".repeat(20);
+		composer.input.dispatchEvent(event("paste", { clipboardData: { files, getData: (format: string) => (format === "text/plain" ? long : "") } }));
+		await settle();
+		assert.deepEqual([...composer.attachmentLabels].sort(), ["Pasted text 1", "a.png", "a.png"]);
+	});
 });

@@ -21,32 +21,51 @@ async function until<T>(what: string, probe: () => T | undefined | null | false 
 	}
 }
 
+/** `OMP_IT_MODEL=<provider>/<model id>`: the model the real turns run on; without it they are skipped. */
+const requestedModel = /^([^/]+)\/(.+)$/.exec(process.env.OMP_IT_MODEL ?? "");
+
 /**
  * Runs against a real OMP installation (`npm run test:real`). Sends real model
- * requests, so it is opt-in and not part of `npm test`.
+ * requests, so it is opt-in and not part of `npm test`. The model and effort it
+ * selects are put back afterwards, in case OMP keeps them as defaults.
  */
 describe("oh-my-pi extension (real OMP)", function () {
 	this.timeout(240_000);
 	let api: ReadyApi;
+	let previous: { provider: string; id: string; thinking: string | undefined } | undefined;
 
 	before(async () => {
 		const activated = await vscode.extensions.getExtension<OmpExtensionApi>("oh-my-pi.oh-my-pi")!.activate();
 		await vscode.commands.executeCommand("omp.openConversation");
 		await until("ready", () => activated.service?.connection.state === "ready", 60_000);
 		api = activated as ReadyApi;
+		const { model, thinkingSelector, thinkingLevel } = api.service.session;
+		if (model) previous = { provider: model.provider, id: model.id, thinking: thinkingSelector ?? thinkingLevel };
+	});
+
+	after(async () => {
+		if (!previous || !api) return;
+		await api.service.setModel(previous.provider, previous.id);
+		if (previous.thinking) await api.service.setThinkingLevel(previous.thinking);
 	});
 
 	it("connects with protocol v2 and discovers configured models", async () => {
 		assert.equal(api.service.connection.protocolVersion, 2);
 		const models = await api.service.listModels();
 		assert.ok(models.length > 0);
-		const haiku = models.find(m => m.provider === "anthropic" && m.id === "claude-haiku-4-5");
-		assert.ok(haiku, "claude-haiku-4-5 is configured in this environment");
-		await api.service.setModel(haiku.provider, haiku.id);
-		assert.equal(api.service.session.model?.id, haiku.id);
 	});
 
-	it("offers OMP's auto effort, keeps it across a real turn and leaves it for an explicit level", async () => {
+	it("switches to the model named by OMP_IT_MODEL", async function () {
+		if (!requestedModel) this.skip();
+		const [, provider, id] = requestedModel;
+		const models = await api.service.listModels();
+		assert.ok(models.some(m => m.provider === provider && m.id === id), `${provider}/${id} is configured in this environment`);
+		await api.service.setModel(provider, id);
+		assert.equal(api.service.session.model?.id, id);
+	});
+
+	it("offers OMP's auto effort, keeps it across a real turn and leaves it for an explicit level", async function () {
+		if (!requestedModel) this.skip();
 		assert.ok(api.service.session.availableThinkingLevels.includes("auto"));
 		await api.service.setThinkingLevel("auto");
 		assert.equal(api.service.session.thinkingSelector, "auto");
@@ -59,7 +78,8 @@ describe("oh-my-pi extension (real OMP)", function () {
 		await api.service.setThinkingLevel("auto");
 	});
 
-	it("runs a real edit, renders it, tracks the change and opens a native diff", async () => {
+	it("runs a real edit, renders it, tracks the change and opens a native diff", async function () {
+		if (!requestedModel) this.skip();
 		const file = path.join(workspace, "sample.txt");
 		const outcome = await api.service.prompt(
 			"Use your edit tool to change the line 'beta' to 'gamma' in sample.txt. Reply with exactly DONE.",

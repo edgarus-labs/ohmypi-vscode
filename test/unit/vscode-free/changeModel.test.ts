@@ -169,6 +169,49 @@ describe("ChangeModel", () => {
 		assert.deepEqual(model.changes, [{ path: file("real.ts"), status: "M", added: 1, removed: 1 }]);
 	});
 
+	it("keeps a file the tool created as added when the tool reports an empty oldText", async () => {
+		const fake = disk();
+		const model = new ChangeModel(fake.read, memoryLogger());
+		await model.apply(start("t1", "write", { path: "new.ts" }), scope);
+		fake.files.set(file("new.ts"), "x\n");
+		await model.apply(end("t1", "write", { path: "new.ts" }, { path: file("new.ts"), oldText: "" }), scope);
+		assert.deepEqual(model.changes, [{ path: file("new.ts"), status: "A", added: 1, removed: 0 }]);
+		assert.equal(model.baseline(file("new.ts")), null);
+	});
+
+	it("drops the work of an event that was in flight when cleared", async () => {
+		let release!: () => void;
+		const blocked = new Promise<void>(resolve => (release = resolve));
+		const model = new ChangeModel(async () => {
+			await blocked;
+			return "x";
+		}, memoryLogger());
+		const applying = model.apply(start("t1", "edit", { path: "a.ts" }), scope);
+		model.clear();
+		release();
+		await applying;
+		assert.equal(model.hasBaseline(file("a.ts")), false);
+	});
+
+	it("treats a Windows path as one file whatever its drive letter case and form", async function () {
+		if (process.platform !== "win32") this.skip();
+		const upper = `${cwd[0].toUpperCase()}${cwd.slice(1)}`;
+		const lower = `${cwd[0].toLowerCase()}${cwd.slice(1)}`;
+		const fake = disk({ [path.join(upper, "a.ts")]: "one\n", [path.join(lower, "a.ts")]: "one\n" });
+		const model = new ChangeModel(fake.read, memoryLogger());
+		const lowerScope = { cwd: lower, roots: [lower] };
+		await model.apply(start("t1", "edit", { path: path.join(upper, "a.ts").replace(/\\/g, "/") }), lowerScope);
+		fake.files.set(path.join(upper, "a.ts"), "two\n");
+		fake.files.set(path.join(lower, "a.ts"), "two\n");
+		await model.apply(end("t1", "edit", { path: path.join(upper, "a.ts").replace(/\\/g, "/") }), lowerScope);
+		await model.apply(start("t2", "edit", { path: "a.ts" }), lowerScope);
+		await model.apply(end("t2", "edit", { path: "a.ts" }), lowerScope);
+		assert.equal(model.changes.length, 1);
+		assert.equal(model.change(path.join(lower, "a.ts"))?.status, "M");
+		assert.equal(model.baseline(path.join(lower, "a.ts")), "one\n");
+		assert.equal(model.baseline(path.join(upper, "a.ts")), "one\n");
+	});
+
 	describe("baseline memory limit", () => {
 		const settle = async (model: ChangeModel, id: string, name: string) => {
 			await model.apply(start(id, "edit", { path: name }), scope);

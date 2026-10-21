@@ -14,6 +14,7 @@ export const MAX_SELECTION_CHARS = 8192;
 const MAX_OPEN_EDITORS = 10;
 const MAX_DIAGNOSTICS = 20;
 const MAX_GIT_CHANGES = 30;
+const MAX_DIAGNOSTIC_CHARS = 300;
 
 function listWithOverflow(items: string[], max: number): string {
 	const shown = items.slice(0, max).join(", ");
@@ -37,7 +38,9 @@ export function formatEditorContext(data: EditorContextData): string {
 		out.push("diagnostics in active file:");
 		for (const diagnostic of data.diagnostics.slice(0, MAX_DIAGNOSTICS)) {
 			const source = diagnostic.source ? ` [${diagnostic.source}]` : "";
-			out.push(`- ${diagnostic.severity} L${diagnostic.line}: ${diagnostic.message.replace(/\s*\n\s*/g, " ")}${source}`);
+			const message = diagnostic.message.replace(/\s*\n\s*/g, " ");
+			const capped = message.length > MAX_DIAGNOSTIC_CHARS ? `${message.slice(0, MAX_DIAGNOSTIC_CHARS - 1)}…` : message;
+			out.push(`- ${diagnostic.severity} L${diagnostic.line}: ${capped}${source}`);
 		}
 		if (data.diagnostics.length > MAX_DIAGNOSTICS) out.push(`(+${data.diagnostics.length - MAX_DIAGNOSTICS} more diagnostics)`);
 	}

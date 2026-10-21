@@ -54,7 +54,8 @@ export class SessionControls {
 			this.#thinkingSelect.dataset.options = optionsKey;
 			this.#thinkingSelect.replaceChildren(...effort.options.map(option => h("option", { attrs: { value: option.value } }, option.label)));
 		}
-		if (effort.value) this.#thinkingSelect.value = effort.value;
+		// An effort the session does not report, or the model does not offer, selects nothing rather than a stale level.
+		this.#thinkingSelect.value = effort.options.find(option => option.value === effort.value)?.value ?? "";
 		this.#thinkingSelect.title =
 			effort.value === "auto" ? `Reasoning effort: auto (OMP picks it per turn${session.thinkingLevel ? `, now ${session.thinkingLevel}` : ""})` : "Reasoning effort";
 

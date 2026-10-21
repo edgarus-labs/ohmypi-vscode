@@ -5,18 +5,30 @@ import * as path from "node:path";
 import type { TransportClose } from "../../src/omp/client";
 import { killProcessTree, OmpProcess } from "../../src/omp/process";
 import { writeNodeLauncher } from "../fixtures/launcher";
-import { FAKE_OMP, FAKE_OMP_SCRIPT, isAlive, memoryLogger, waitFor } from "./helpers";
+import { FAKE_OMP, FAKE_OMP_SCRIPT, isAlive, memoryLogger, tick, waitFor } from "./helpers";
 describe("OmpProcess (fake-omp child process)", function () {
 	this.timeout(15000);
 	let sessionDir: string;
 	const started: OmpProcess[] = [];
+	/** Processes a test let escape the OMP process tree on purpose. */
+	const strays: number[] = [];
 
 	beforeEach(() => {
 		sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-proc-"));
 	});
 	afterEach(async () => {
-		for (const proc of started.splice(0)) await proc.shutdown(500);
+		for (const pid of strays.splice(0)) {
+			try {
+				process.kill(pid);
+			} catch (error) {
+				if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+			}
+			await waitFor(() => !isAlive(pid), 3000, `stray ${pid} gone`);
+		}
+		const shutdowns = await Promise.allSettled(started.splice(0).map(proc => proc.shutdown(500)));
 		fs.rmSync(sessionDir, { recursive: true, force: true });
+		const failed = shutdowns.find(result => result.status === "rejected");
+		if (failed) throw failed.reason;
 	});
 
 	function spawnFake(env: Record<string, string> = {}, extraArgs: string[] = ["--profile", "x"]) {
@@ -61,7 +73,7 @@ describe("OmpProcess (fake-omp child process)", function () {
 		const binDir = path.join(sessionDir, "my tools (x86) & more");
 		fs.mkdirSync(binDir);
 		const launcher = writeNodeLauncher(binDir, "omp", FAKE_OMP_SCRIPT);
-		const args = ["--profile", "a b", "--name", 'x&y|z "q" 100% ^c'];
+		const args = ["--profile", "a b", "--name", 'x&y|z "q" 100% ^c', "%OS%", "!OS!", "trailing\\", ""];
 		const logger = memoryLogger();
 		const proc = new OmpProcess({ executable: launcher, args, cwd: sessionDir, env: { ...process.env, FAKE_OMP_SESSION_DIR: sessionDir }, logger });
 		started.push(proc);
@@ -103,6 +115,43 @@ describe("OmpProcess (fake-omp child process)", function () {
 		assert.ok(tail.endsWith(`a\n${"b".repeat(3000)}`));
 	});
 
+	it("decodes a multibyte character split between stderr chunks", async () => {
+		const { closes } = spawnScript(
+			'const b = Buffer.from("żółw\\n"); process.stderr.write(b.subarray(0, 1)); setTimeout(() => { process.stderr.write(b.subarray(1)); process.exitCode = 1; }, 200);',
+		);
+		await waitFor(() => closes.length > 0, 5000, "exit");
+		assert.equal(closes[0].stderr, "żółw");
+	});
+
+	it("logs an unterminated stderr line in bounded pieces", async () => {
+		const { logger, closes } = spawnScript('process.stderr.write("a".repeat(200 * 1024)); process.stderr.write("b".repeat(10)); process.exitCode = 1;');
+		await waitFor(() => closes.length > 0, 5000, "exit");
+		const pieces = logger.records.filter(r => r.level === "debug" && r.message.startsWith("omp: ")).map(r => r.message.length - "omp: ".length);
+		assert.ok(pieces.length >= 3 && pieces.every(length => length <= 64 * 1024), JSON.stringify(pieces));
+		assert.equal(pieces.reduce((sum, length) => sum + length, 0), 200 * 1024 + 10);
+		assert.ok(closes[0].stderr?.endsWith("a".repeat(100) + "b".repeat(10)));
+	});
+
+	it("delivers no output after reporting the close when an escaped descendant still holds stdout", async () => {
+		const { proc, logger, closes } = spawnScript(`
+			const { spawn } = require("node:child_process");
+			const child = spawn(process.execPath, ["-e", "setInterval(() => process.stdout.write('late\\\\n'), 50); setTimeout(() => process.exit(), 10000);"], { stdio: ["ignore", "inherit", "ignore"], detached: true });
+			process.stderr.write("escaped pid " + child.pid + "\\n");
+			child.unref();
+			setTimeout(() => process.exit(0), 200);
+		`);
+		const late: string[] = [];
+		proc.onData(chunk => {
+			if (closes.length > 0) late.push(Buffer.from(chunk).toString("utf8"));
+		});
+		await waitFor(() => /escaped pid (\d+)/.test(logger.text("debug")), 5000, "escaped pid");
+		strays.push(Number(/escaped pid (\d+)/.exec(logger.text("debug"))![1]));
+		await waitFor(() => closes.length > 0, 5000, "close");
+		// The escaped process writes every 50 ms on real time; silence over several of its periods shows the stream is detached.
+		await tick(300);
+		assert.deepEqual(late, []);
+	});
+
 	it("reports a write the pipe rejects after the process went away", async () => {
 		const { proc } = spawnScript("");
 		const errors: Error[] = [];
@@ -112,9 +161,11 @@ describe("OmpProcess (fake-omp child process)", function () {
 		assert.ok(errors[0] instanceof Error);
 	});
 
-	it("shuts down gracefully via stdin EOF, idempotently, leaving no process behind", async () => {
-		const { proc, closes, stdout } = spawnFake();
+	it("shuts down gracefully via stdin EOF, idempotently, leaving no process of the tree behind", async () => {
+		const { proc, logger, closes, stdout } = spawnFake({ FAKE_OMP_SPAWN_CHILD: "1" });
 		await waitFor(() => stdout().includes("ready"));
+		await waitFor(() => /child pid (\d+)/.test(logger.text("debug")), 5000, "grandchild pid");
+		const grandchild = Number(/child pid (\d+)/.exec(logger.text("debug"))![1]);
 		const pid = proc.pid!;
 		const first = proc.shutdown(3000);
 		const second = proc.shutdown(3000);
@@ -122,6 +173,7 @@ describe("OmpProcess (fake-omp child process)", function () {
 		assert.equal(closes.length, 1);
 		assert.equal(closes[0].code, 0);
 		assert.equal(isAlive(pid), false);
+		await waitFor(() => !isAlive(grandchild), 3000, "grandchild gone");
 	});
 
 	it("escalates past an ignored stdin EOF and SIGTERM and kills the whole process tree", async () => {

@@ -14,6 +14,10 @@ const ICON_BY_STATUS: Record<AgentStatus, vscode.ThemeIcon> = {
 /** `omp.agents`: the main agent at the root with subagents nested under their parent. */
 export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vscode.Disposable {
 	private agents: readonly AgentView[] = [];
+	private byId = new Map<string, AgentView>();
+	/** Nesting parent per agent id; see {@link nestingParents}. */
+	private parents = new Map<string, string | undefined>();
+	private children = new Map<string | undefined, AgentView[]>();
 	private subscription: Disposable | undefined;
 	private readonly emitter = new vscode.EventEmitter<void>();
 	private readonly summaryEmitter = new vscode.EventEmitter<string>();
@@ -30,6 +34,15 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vs
 
 	private update(agents: readonly AgentView[]): void {
 		this.agents = agents;
+		this.byId = new Map(agents.map(agent => [agent.id, agent]));
+		this.parents = nestingParents(this.byId);
+		this.children = new Map();
+		for (const agent of agents) {
+			const parent = this.parents.get(agent.id);
+			const siblings = this.children.get(parent);
+			if (siblings) siblings.push(agent);
+			else this.children.set(parent, [agent]);
+		}
 		this.emitter.fire();
 		const summary = agentsSummary(agents);
 		if (summary === this.lastSummary) return;
@@ -47,28 +60,20 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vs
 	}
 
 	find(id: string): AgentView | undefined {
-		return this.agents.find(agent => agent.id === id);
-	}
-
-	/** Parent used for nesting: the declared parent when present, else main. */
-	private parentOf(agent: AgentView): string | undefined {
-		if (agent.id === "main") return undefined;
-		const ids = new Set(this.agents.map(candidate => candidate.id));
-		if (agent.parentId && agent.parentId !== agent.id && ids.has(agent.parentId)) return agent.parentId;
-		return ids.has("main") ? "main" : undefined;
+		return this.byId.get(id);
 	}
 
 	getChildren(element?: AgentView): AgentView[] {
-		return sortAgents(this.agents.filter(agent => this.parentOf(agent) === element?.id));
+		return sortAgents(this.children.get(element?.id) ?? []);
 	}
 
 	getParent(element: AgentView): AgentView | undefined {
-		const parent = this.parentOf(element);
+		const parent = this.parents.get(element.id);
 		return parent === undefined ? undefined : this.find(parent);
 	}
 
 	getTreeItem(agent: AgentView): vscode.TreeItem {
-		const hasChildren = this.agents.some(candidate => this.parentOf(candidate) === agent.id);
+		const hasChildren = this.children.has(agent.id);
 		const item = new vscode.TreeItem(
 			agentRowLabel(agent),
 			hasChildren ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
@@ -105,4 +110,31 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<AgentView>, vs
 		this.emitter.dispose();
 		this.summaryEmitter.dispose();
 	}
+}
+
+/**
+ * Parent used for nesting each agent: main has none; any other agent nests under its declared
+ * parent when that agent exists and does not lead back to it through declared parents, else under
+ * main (at the root without a main agent).
+ */
+function nestingParents(byId: ReadonlyMap<string, AgentView>): Map<string, string | undefined> {
+	const declared = (agent: AgentView | undefined): string | undefined =>
+		agent && agent.id !== "main" && agent.parentId !== agent.id && agent.parentId !== undefined && byId.has(agent.parentId) ? agent.parentId : undefined;
+	const fallback = byId.has("main") ? "main" : undefined;
+	const parents = new Map<string, string | undefined>();
+	for (const agent of byId.values()) {
+		if (agent.id === "main") {
+			parents.set(agent.id, undefined);
+			continue;
+		}
+		const parent = declared(agent);
+		const seen = new Set<string>();
+		let ancestor = parent;
+		while (ancestor !== undefined && ancestor !== agent.id && !seen.has(ancestor)) {
+			seen.add(ancestor);
+			ancestor = declared(byId.get(ancestor));
+		}
+		parents.set(agent.id, parent !== undefined && ancestor !== agent.id ? parent : fallback);
+	}
+	return parents;
 }

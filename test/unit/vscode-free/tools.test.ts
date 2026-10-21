@@ -85,10 +85,14 @@ describe("summarizeTool", () => {
 });
 
 describe("tool helpers", () => {
-	it("splits MCP names into server and tool", () => {
+	it("splits MCP names into server and tool at a double underscore", () => {
 		assert.deepEqual(splitMcpName("mcp__github__get_me"), { server: "github", tool: "get_me" });
-		assert.deepEqual(splitMcpName("mcp__context7_query_docs"), { server: "context7", tool: "query_docs" });
 		assert.deepEqual(splitMcpName("mcp__solo"), { server: "solo", tool: "" });
+	});
+
+	it("keeps an MCP name whole when a single underscore cannot tell server from tool", () => {
+		assert.deepEqual(splitMcpName("mcp__mcp_proxmox_gateway_proxmox_pools_list"), { server: "mcp_proxmox_gateway_proxmox_pools_list", tool: "" });
+		assert.deepEqual(splitMcpName("mcp__context7_query_docs"), { server: "context7_query_docs", tool: "" });
 	});
 
 	it("counts hits from details or result lines", () => {
@@ -138,6 +142,17 @@ describe("toolHeadline", () => {
 	it("marks running tools without a duration", () => {
 		const head = toolHeadline(tool({ name: "bash", args: { command: "sleep 10\necho done" }, status: "running", partial: "x" }));
 		assert.deepEqual(head, { name: "bash", primary: "sleep 10 echo done", glyph: "…", state: "running", detail: "" });
+	});
+
+	it("shows no duration for a stored call that has no start time", () => {
+		const head = toolHeadline(tool({ name: "bash", args: { command: "make" }, startedAt: 0, endedAt: 1_760_000_000_000, result: { text: "", isError: false } }));
+		assert.equal(head.detail, "");
+	});
+
+	it("does not throw for a call without a tool name", () => {
+		const head = toolHeadline(tool({ name: undefined as unknown as string, args: { command: "make" }, endedAt: 1_001 }));
+		assert.equal(head.state, "done");
+		assert.match(head.error ?? "", /^Could not summarize this call: /);
 	});
 
 	it("counts written lines", () => {
@@ -204,6 +219,16 @@ describe("fileLinkLabel", () => {
 		assert.equal(fileLinkLabel("/home/me/repo/src/a.ts", undefined, "/home/me/repo/"), "src/a.ts");
 	});
 
+	it("matches a Windows working directory whatever the drive letter case and separators", () => {
+		assert.equal(fileLinkLabel("d:\\dev\\repo\\src\\a.ts", 3, "D:\\dev\\repo"), "src\\a.ts:3");
+		assert.equal(fileLinkLabel("D:/dev/repo/src/a.ts", undefined, "D:\\dev\\repo"), "src/a.ts");
+		assert.equal(fileLinkLabel("D:\\dev\\repo\\src\\a.ts", undefined, "d:/dev/repo"), "src\\a.ts");
+	});
+
+	it("keeps POSIX paths case-sensitive", () => {
+		assert.equal(fileLinkLabel("/Home/me/repo/a.ts", undefined, "/home/me/repo"), "/Home/me/repo/a.ts");
+	});
+
 	it("keeps paths outside the working directory absolute", () => {
 		assert.equal(fileLinkLabel("/etc/hosts", 3, "/home/me/repo"), "/etc/hosts:3");
 		assert.equal(fileLinkLabel("src/a.ts", undefined, undefined), "src/a.ts");
@@ -224,6 +249,13 @@ describe("splitSelector", () => {
 		assert.deepEqual(splitSelector("src/a.ts:5-16:raw"), { path: "src/a.ts", line: 5 });
 		assert.deepEqual(splitSelector("src/a.ts:raw:2-4"), { path: "src/a.ts", line: 2 });
 		assert.deepEqual(splitSelector("C:\\repo\\a.ts:7"), { path: "C:\\repo\\a.ts", line: 7 });
+	});
+
+	it("strips the conflicts, image and video time selectors", () => {
+		assert.deepEqual(splitSelector("src/a.ts:conflicts"), { path: "src/a.ts" });
+		assert.deepEqual(splitSelector("media/icon.svg:img"), { path: "media/icon.svg" });
+		assert.deepEqual(splitSelector("clip.mp4:1h5m42s"), { path: "clip.mp4" });
+		assert.deepEqual(splitSelector("clip.mp4:90s"), { path: "clip.mp4" });
 	});
 
 	it("leaves plain paths alone", () => {
@@ -393,5 +425,12 @@ describe("fileActions", () => {
 	it("offers no Diff for reads and running calls", () => {
 		assert.deepEqual(fileActions(done(undefined, { path: "/w/a.ts" }, "read"), "/w"), []);
 		assert.deepEqual(fileActions({ ...done(undefined, { path: "/w/a.ts" }), status: "running" }, "/w"), []);
+	});
+
+	it("offers no Diff for a failed call that recorded no diff", () => {
+		const failed: ToolItem = { ...done(undefined, { path: "/w/a.ts" }, "write"), status: "error", result: { text: "EACCES", isError: true } };
+		assert.deepEqual(fileActions(failed, "/w"), []);
+		const partly = { ...failed, name: "edit", result: { text: "1 of 2 edits failed", isError: true, details: { diff: "-a\n+b" } } };
+		assert.deepEqual(fileActions(partly, "/w"), [{ kind: "diff", path: "/w/a.ts", label: "Diff" }]);
 	});
 });

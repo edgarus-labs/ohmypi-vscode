@@ -70,11 +70,13 @@ describe("OmpService against fake-omp", function () {
 		return { service, logger, phases, states, items, tools, interactions, cancelled, presentations };
 	}
 
+	/** Commands fake-omp logged; a last line it is still writing has no newline yet and is left out. */
 	const sentCommands = () =>
 		fs.existsSync(logFile)
 			? fs
 					.readFileSync(logFile, "utf8")
 					.split("\n")
+					.slice(0, -1)
 					.filter(Boolean)
 					.map(line => JSON.parse(line) as Record<string, unknown>)
 			: [];

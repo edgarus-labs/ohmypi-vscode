@@ -84,6 +84,38 @@ describe("webview app", () => {
 		assert.equal(root.querySelector(".session-title")?.textContent, "Renamed");
 		assert.match(root.querySelector(".item.notice")?.textContent ?? "", /^Could not show the reset message: /);
 		assert.equal(api.postedOf("rendered").length, 1);
+		assert.deepEqual(api.postedOf("respond"), [{ type: "respond", id: "s1", response: { kind: "cancelled" } }]);
+	});
+
+	it("keeps an answer being typed when a reset shows the same question, and drops answered questions", () => {
+		const pending = { request: { id: "i1", kind: "input", title: "Name?" } } as const;
+		app.handle(reset({ interactions: [pending] }));
+		const field = root.querySelector<HTMLInputElement>(".interaction input");
+		assert.ok(field);
+		field.value = "half typed";
+		app.handle(reset({ interactions: [pending] }));
+		assert.equal(root.querySelector<HTMLInputElement>(".interaction input")?.value, "half typed");
+		app.handle(reset());
+		assert.equal(root.querySelectorAll(".interaction").length, 0);
+	});
+
+	it("keeps file and text attachments across a reload and names the images it could not keep", async () => {
+		app.handle(reset());
+		app.handle({ type: "addAttachments", attachments: [{ id: "f1", kind: "file", path: "/w/a.ts", label: "a.ts" }] });
+		const image = new File([new Uint8Array(4)], "shot.png", { type: "image/png" });
+		const long = "line\n".repeat(20);
+		root.querySelector("textarea.input")?.dispatchEvent(event("paste", { clipboardData: { files: [image], getData: (format: string) => (format === "text/plain" ? long : "") } }));
+		await settle();
+		root.remove();
+		app = start();
+		app.handle(reset());
+		assert.deepEqual(
+			[...root.querySelectorAll(".attachments .chip")].map(chip => chip.className),
+			["chip file", "chip text"],
+		);
+		assert.match(root.querySelector(".item.notice")?.textContent ?? "", /shot\.png/);
+		app.handle(reset());
+		assert.equal(root.querySelectorAll(".item.notice").length, 0);
 	});
 
 	it("clears the composer only after the host accepted the prompt", () => {

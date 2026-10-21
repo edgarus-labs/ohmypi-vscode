@@ -54,7 +54,9 @@ async function readSummary(file: string): Promise<SessionSummary | undefined> {
 		} else if (entry.type === "message" && summary.firstMessage === undefined && isRecord(entry.message)) {
 			if (entry.message.role !== "user") continue;
 			const text = userText(entry.message.content)?.trim();
-			if (text) summary.firstMessage = text.length > FIRST_MESSAGE_CHARS ? `${text.slice(0, FIRST_MESSAGE_CHARS)}…` : text;
+			if (!text) continue;
+			const chars = Array.from(text);
+			summary.firstMessage = chars.length > FIRST_MESSAGE_CHARS ? `${chars.slice(0, FIRST_MESSAGE_CHARS).join("")}…` : text;
 		}
 	}
 	return hasHeader ? summary : undefined;

@@ -41,7 +41,7 @@ export interface ConnectionStatus {
  * idle → submitting (prompt sent, not admitted) → running (admitted / agent_start)
  *      → yielded (prompt_result received, sessionSettled=false; background work may wake the agent)
  *      → idle (session_settled, or prompt_result with sessionSettled=true, or agentInvoked=false).
- * `aborting` is entered by abort() while the agent is busy and left on the next prompt_result/agent_end/session_settled.
+ * `aborting` is entered by abort() while a prompt is open or the agent runs, and lasts until neither is the case.
  */
 export type SessionPhase = "idle" | "submitting" | "running" | "yielded" | "aborting";
 
@@ -57,7 +57,7 @@ export interface ModelView {
 	thinkingEfforts: string[];
 	/** Input modalities, e.g. ["text","image"]. */
 	input: string[];
-	/** USD per million tokens, when OMP reports pricing. */
+	/** USD per million tokens, when OMP reports input and output pricing; unreported cache rates are 0. */
 	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	/** How OMP classifies the model (vendor class, family, revision such as `5.5.0`), when it does. */
 	identity?: { class?: string; family?: string; revision?: string };
@@ -171,7 +171,7 @@ export type TranscriptItem =
 			args: unknown;
 			/** `unresolved`: a stored call with no recorded result (interrupted, or still running elsewhere). */
 			status: "running" | "done" | "error" | "unresolved";
-			/** Latest streamed partial output (tool_execution_update / tool_stream_update), plain text. */
+			/** Latest partial output streamed by tool_execution_update, plain text. */
 			partial?: string;
 			result?: ToolResultView;
 			startedAt: number;
@@ -413,7 +413,8 @@ export interface OmpServiceApi extends Disposable {
 	/** Removes a pending prompt item whose prompt is not going to be sent. */
 	discardPendingPrompt(id: string): void;
 	/**
-	 * Send user input. `auto`: plain prompt when idle, `steer` while the agent works.
+	 * Send user input. `auto`: plain prompt when idle, `steer` while the agent works; while idle every mode
+	 * sends a plain prompt. Rejects when OMP is not ready; any later failure resolves with status `error`.
 	 * Resolves at the prompt's completion (`prompt_result` or local completion), not at acknowledgement.
 	 * `pendingItemId` (from {@link addPendingPrompt}) is removed when OMP does not admit the prompt and
 	 * stays, no longer pending, when the prompt completes without OMP recording a user message.
@@ -434,8 +435,16 @@ export interface OmpServiceApi extends Disposable {
 	respondInteraction(id: string, response: InteractionResponse): void;
 
 	cancelAgent(agentId: string): Promise<boolean>;
-	/** "main" steers the session's own turn (rejects when OMP is not running); others steer a subagent. */
+	/**
+	 * "main" steers the session's own turn, or starts a new one when the turn has ended meanwhile; rejects when OMP
+	 * is not running and reports a failed prompt in `session.lastError`. Others steer a subagent.
+	 */
 	steerAgent(agentId: string, message: string): Promise<void>;
-	/** Transcript of a subagent ("main" returns the current session transcript). */
+	/**
+	 * Transcript of a subagent; while it runs, the calls of its last reply without a result are running.
+	 * "main" returns the current session transcript.
+	 */
 	getAgentTranscript(agentId: string): Promise<TranscriptItem[]>;
+	/** Stops OMP in the background; no listener is notified from now on. */
+	dispose(): void;
 }

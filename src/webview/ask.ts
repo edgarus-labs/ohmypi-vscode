@@ -16,7 +16,7 @@ export function buildAskAnswers(questions: readonly AskQuestionView[], states: r
 	return questions.map((question, index) => {
 		const state = states[index] ?? { selected: [], custom: "" };
 		const chosen = new Set(state.selected);
-		const selectedOptions = question.options.map(option => option.label).filter(label => chosen.has(label));
+		const selectedOptions = [...new Set(question.options.map(option => option.label))].filter(label => chosen.has(label));
 		const customInput = state.custom.trim();
 		if (!question.multi) {
 			if (customInput) return { id: question.id, selectedOptions: [], customInput };

@@ -87,7 +87,7 @@ export class Header {
 		this.#stateBox.className = `state state-${word}${word === "idle" ? " hidden" : ""}`;
 		this.#label.textContent = word;
 		const { connection, session } = state;
-		this.#stateBox.title = `connection: ${connection.state}${connection.detail ? ` (${connection.detail})` : ""}`;
+		this.#stateBox.title = `${word} · connection: ${connection.state}${connection.detail ? ` (${connection.detail})` : ""}`;
 		this.#sessionButton.textContent = session.sessionName || "New chat";
 		this.#sessionButton.title = `${session.sessionName || "New chat"}\n${session.sessionFile ?? "No session file yet"}\nClick to rename`;
 		this.#renderElapsed();

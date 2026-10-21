@@ -54,10 +54,7 @@ export class PromptTracker {
 	}
 
 	agentEnd(yielded: boolean): void {
-		if (yielded) {
-			this.#runActive = false;
-			if (this.#tickets.size === 0) this.#aborting = false;
-		}
+		if (yielded) this.#runActive = false;
 		this.#update();
 	}
 
@@ -75,20 +72,17 @@ export class PromptTracker {
 		} else if (frame.agentInvoked) {
 			this.#settlePending = true;
 		}
-		if (this.#tickets.size === 0) this.#aborting = false;
 		this.#update();
 	}
 
 	sessionSettled(): void {
 		this.#settlePending = false;
 		this.#runActive = false;
-		if (this.#tickets.size === 0) this.#aborting = false;
 		this.#update();
 	}
 
 	/** Marks the running turn as aborting; idle and yielded sessions have no turn to abort. */
 	abortRequested(): void {
-		if (this.#tickets.size === 0 && !this.#runActive) return;
 		this.#aborting = true;
 		this.#update();
 	}
@@ -98,7 +92,6 @@ export class PromptTracker {
 		for (const id of [...this.#tickets.keys()]) this.#complete(id, { status: "error", error, sessionSettled: true });
 		this.#runActive = false;
 		this.#settlePending = false;
-		this.#aborting = false;
 		this.#update();
 	}
 
@@ -109,7 +102,9 @@ export class PromptTracker {
 		ticket.resolve(outcome);
 	}
 
+	/** Publishes the derived phase; an abort ends once no prompt is open and no run is active. */
 	#update(): void {
+		if (this.#tickets.size === 0 && !this.#runActive) this.#aborting = false;
 		const phase = this.#derive();
 		if (phase === this.#phase) return;
 		this.#phase = phase;
@@ -117,8 +112,7 @@ export class PromptTracker {
 	}
 
 	#derive(): SessionPhase {
-		const busy = this.#tickets.size > 0 || this.#runActive;
-		if (this.#aborting && busy) return "aborting";
+		if (this.#aborting) return "aborting";
 		if (this.#runActive) return "running";
 		if (this.#tickets.size > 0) {
 			for (const ticket of this.#tickets.values()) if (ticket.admitted) return "running";

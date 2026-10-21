@@ -7,7 +7,8 @@ The extension is a frontend only. OMP remains the runtime and the source of trut
 ## Requirements
 
 - VS Code 1.95 or newer, locally or in a remote extension host.
-- A trusted workspace: in Restricted Mode the extension does not start OMP and ignores `omp.executablePath` and `omp.extraArgs` from workspace settings. Trusting the workspace starts OMP.
+- A trusted workspace: in Restricted Mode the extension does not start OMP. Trusting the workspace starts OMP.
+- A folder on disk, local or remote. Virtual workspaces (for example GitHub Repositories in the browser) are not supported.
 - An installed and configured OMP (`omp`, tested with 18.5.1). Configure providers, logins and models with OMP itself, for example by running `omp` once in a terminal. The extension has no provider settings and stores no credentials.
 
 ## Installation
@@ -27,13 +28,17 @@ npm run package          # writes dist-vsix/oh-my-pi.vsix
 
 ## Finding the OMP executable
 
-When `omp.executablePath` is empty, the extension looks for `omp` on `PATH` (on Windows, `omp.exe` and `omp.cmd`), then in `~/.local/bin/omp` and `~/.bun/bin/omp`. A configured path must be absolute or start with `~`; on Windows it must point to a `.exe`, `.com`, `.cmd` or `.bat` file. If it can't find one, the views show an "OMP not found" banner with a link to the setting.
+When `omp.executablePath` is empty, the extension looks for `omp` on `PATH` (on Windows, `omp.exe` and `omp.cmd`), then in `~/.local/bin/omp` and `~/.bun/bin/omp`. A configured path must be absolute or start with `~`; on Windows it must point to a `.exe`, `.com`, `.cmd` or `.bat` file. If it can't find one, the chat shows an "OMP not found" banner with Open Settings and Retry, the Agents and Changes sections show the reason, and a notification offers Open Settings.
+
+## Working directory
+
+OMP runs in the first workspace folder, also in a multi-root workspace. With no folder open it runs in the folder of the active file, or else in your home directory, and starts only when you first use it (a prompt, a command or **Start OMP**).
 
 ## Layout
 
 OMP lives in its own panel in the **Secondary Side Bar** on the right, like Claude Code, GitHub Copilot Chat and Codex, so the Explorer and your editors stay where they are. Open it with the OMP icon on the right, `OMP: Open in Side Bar`, or the `OMP: …` status bar item; toggle the whole right panel with `View > Appearance > Secondary Side Bar` (Ctrl+Alt+B / Cmd+Option+B). The panel has three sections:
 
-- **Chat**: the conversation and the input box. The section title bar has New Session, Session History and Abort (while busy); Rename, Open Session File, Restart, Show Log and Settings are in its `...` menu.
+- **Chat**: the conversation and the input box. The section title bar has New Session, Session History and Abort (while busy); Rename, Open Session, Restart, Show Log and Settings are in its `...` menu.
 - **Agents** (collapsed by default): one row per agent, labelled with the subagent's OMP name (`ReviewAuth  scout · running · read src/auth.ts`), subagents nested under their parent, running agents first. The section title shows how many are running.
 - **Changes** (collapsed by default): one row per file changed by OMP, with status, folder and line counts (`M · src/auth · +3 −1`). Click a file for VS Code's native diff in the editor area. Starting a new session clears the list and closes its diff editors.
 
@@ -60,7 +65,8 @@ On VS Code older than 1.106, which has no extension containers in the Secondary 
 - **Tool rendering**: specialized renderers for read, write, edit and ast_edit (path links and colored diff), grep, glob and ast_grep, bash and eval (live output, exit code), task (subagents), lsp, debug, MCP tools and jobs. Any unknown tool falls back to a generic renderer.
 - **Changes view**: lists files changed by OMP tools. Click a file to open VS Code's native diff of the content before the change against the current file, or open the file itself.
 - **Approvals and questions**: OMP `confirm`, `select`, `input`, `editor` and `ask` requests appear inline in the conversation and take focus unless you are typing. When the conversation is hidden, a notification with a native quick-pick or input-box fallback also appears. Nothing is ever auto-approved. If an answer cannot be delivered, the question stays open and the error is shown. Answers to `input` requests are never written to the RPC trace. OMP's approval policy (`tools.approvalMode`) is configured in OMP.
-- **Process management**: the extension negotiates protocol v2, including reassembly of chunked frames, and handles stdout and stderr separately. If OMP exits unexpectedly, the chat and a notification (with Restart and Show Log) report it together with OMP's last stderr lines, and the extension restarts it with bounded backoff (3 attempts within 60 s) and re-binds the current session. On shutdown it closes stdin, then sends SIGTERM and then SIGKILL to the process group (on Windows, `taskkill /T /F` on the process tree), so no OMP processes are left behind.
+- **Process management**: the extension negotiates protocol v2, including reassembly of chunked frames, and handles stdout and stderr separately. If OMP exits unexpectedly, the chat and a notification (with Restart and Show Log) report it together with OMP's last stderr lines, and the extension restarts it with bounded backoff (3 attempts within 60 s) and re-binds the current session. On shutdown it closes stdin, then sends SIGTERM and then SIGKILL to the process group (on Windows, `taskkill /T /F` on the process tree), so stopping OMP from the extension leaves no OMP processes behind. On Windows, processes OMP itself started (shell tools, MCP servers, language servers) can outlive an OMP that exits by itself, because `taskkill` needs the parent alive to find them.
+- **Session cost**: the header's cost is the running sum of the main agent's replies. After a compacted session is reloaded OMP returns only the messages after the compaction, so the total restarts from there; subagent cost is not included.
 - **Accessibility**: screen readers hear each finished reply, notice and question once; streaming text and the elapsed timer are not read out. Notices expand with Enter or Space.
 - **Changes and file links outside the workspace**: change tracking only follows files inside OMP's working directory and the workspace folders. Opening a file link or tool diff that points outside the workspace asks for confirmation first.
 - **Agent control of VS Code**: the extension registers `vscode_*` host tools with OMP every time it starts, so agents can operate the editor, not just chat in it. They run in the extension host through the VS Code API, and a failure comes back to the agent as a tool error; OMP's `host_tool_cancel` cancels a call, and calls in flight are cancelled when OMP stops. Every path argument must lie inside OMP's working directory or a workspace folder; other paths are refused. Results are capped at 40,000 characters. Approval of tool calls is OMP's policy, as for any tool.
@@ -83,9 +89,9 @@ These settings cover the frontend only:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `omp.executablePath` | `""` | Absolute path to `omp` (or starting with `~`); empty means search as described above. Ignored from untrusted workspace settings. |
-| `omp.extraArgs` | `[]` | Extra CLI arguments for `omp --mode rpc-ui`, for example `["--profile", "work"]` or `["--approval-mode", "always-ask"]`. |
-| `omp.startup` | `resumeLast` | `resumeLast`, `newSession` or `manual`. |
+| `omp.executablePath` | `""` | Absolute path to `omp` (or starting with `~`); empty means search as described above. Machine scope: set it in your user settings (or the remote machine's settings), never in a workspace's `.vscode/settings.json`, which VS Code ignores for it. |
+| `omp.extraArgs` | `[]` | Extra CLI arguments for `omp --mode rpc-ui`, for example `["--profile", "work"]` or `["--approval-mode", "always-ask"]`. Machine scope, like `omp.executablePath`: a repository cannot change how OMP is started. |
+| `omp.startup` | `resumeLast` | `resumeLast`, `newSession` or `manual`. With `manual`, OMP starts on the first prompt or command and resumes the last session (New Session starts a fresh one). |
 | `omp.autoRestart` | `true` | Restart OMP after an unexpected exit. |
 | `omp.logLevel` | `info` | Verbosity of the `oh-my-pi` output channel. |
 | `omp.traceRpc` | `false` | Log abbreviated RPC frames; takes effect immediately. Answers to `input` requests are redacted. |

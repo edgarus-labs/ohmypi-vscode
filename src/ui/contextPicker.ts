@@ -2,9 +2,44 @@ import * as vscode from "vscode";
 import type { Logger } from "../omp/api";
 import { deferred } from "../shared/deferred";
 import { errorMessage } from "../shared/errors";
+import { isRecord } from "../shared/guards";
 
 const WORKSPACE_FILE_LIMIT = 5000;
-const WORKSPACE_EXCLUDE = "**/{node_modules,.git}/**";
+const ALWAYS_EXCLUDED = ["**/node_modules/**", "**/.git/**"];
+
+/** `a{b,c}d` as `abd` and `acd`, nested groups too, so every alternative fits in one `{…}` group. */
+function expandBraces(pattern: string): string[] {
+	const open = pattern.indexOf("{");
+	if (open < 0) return [pattern];
+	const cuts = [open];
+	let depth = 0;
+	for (let i = open; i < pattern.length; i++) {
+		const char = pattern[i];
+		if (char === "{") depth++;
+		else if (char === "," && depth === 1) cuts.push(i);
+		else if (char === "}" && --depth === 0) {
+			cuts.push(i);
+			const head = pattern.slice(0, open);
+			const tail = pattern.slice(i + 1);
+			return cuts.slice(1).flatMap((cut, index) => expandBraces(head + pattern.slice(cuts[index] + 1, cut) + tail));
+		}
+	}
+	return [pattern];
+}
+
+/**
+ * One glob for everything Quick Open leaves out: node_modules, .git and the patterns `files.exclude` and
+ * `search.exclude` switch on. Patterns with a `when` condition stay included.
+ */
+function workspaceExclude(): string {
+	const enabled = (setting: unknown) => (isRecord(setting) ? Object.entries(setting).flatMap(([pattern, on]) => (on === true ? expandBraces(pattern) : [])) : []);
+	const patterns = new Set([
+		...ALWAYS_EXCLUDED,
+		...enabled(vscode.workspace.getConfiguration("files").get("exclude")),
+		...enabled(vscode.workspace.getConfiguration("search").get("exclude")),
+	]);
+	return `{${[...patterns].join(",")}}`;
+}
 
 interface FileItem extends vscode.QuickPickItem {
 	uri?: vscode.Uri;
@@ -46,8 +81,11 @@ export function pickContextFiles(logger: Logger): Promise<vscode.Uri[]> {
 	picker.items = openItems;
 	picker.busy = true;
 	const openKeys = new Set(open.map(uri => uri.toString()));
-	vscode.workspace.findFiles("**/*", WORKSPACE_EXCLUDE, WORKSPACE_FILE_LIMIT).then(
+	const search = new vscode.CancellationTokenSource();
+	const searchToken = search.token;
+	vscode.workspace.findFiles("**/*", workspaceExclude(), WORKSPACE_FILE_LIMIT, searchToken).then(
 		files => {
+			if (searchToken.isCancellationRequested) return;
 			const selected = picker.selectedItems;
 			const rest = files
 				.filter(uri => !openKeys.has(uri.toString()))
@@ -58,6 +96,7 @@ export function pickContextFiles(logger: Logger): Promise<vscode.Uri[]> {
 			picker.busy = false;
 		},
 		error => {
+			if (searchToken.isCancellationRequested) return;
 			logger.warn("Workspace file search failed", error);
 			picker.title = `Add files to the OMP chat (workspace search failed: ${errorMessage(error)})`;
 			picker.busy = false;
@@ -69,6 +108,8 @@ export function pickContextFiles(logger: Logger): Promise<vscode.Uri[]> {
 		picker.hide();
 	});
 	picker.onDidHide(() => {
+		search.cancel();
+		search.dispose();
 		resolve([]);
 		picker.dispose();
 	});

@@ -14,6 +14,7 @@ import type {
 	TranscriptItem,
 } from "../omp/api";
 import { errorMessage } from "../shared/errors";
+import { isRecord } from "../shared/guards";
 import { emptySessionView } from "../shared/session";
 import { editorContextBlock } from "../vscode/EditorContext";
 import {
@@ -27,7 +28,7 @@ import {
 	type WebviewMessage,
 } from "../webview/protocol";
 import { pickContextFiles } from "./contextPicker";
-import type { InteractionSurface } from "./interactions";
+import { type InteractionSurface, openExternalUrl } from "./interactions";
 import { composePrompt } from "./promptComposer";
 import { recentSessions } from "./recentSessions";
 
@@ -47,9 +48,10 @@ function isSlashCommand(text: string, commands: readonly SlashCommandView[]): bo
 }
 
 const EXTERNAL_SCHEMES = ["http:", "https:", "mailto:"];
+const PROMPT_MODES: readonly unknown[] = ["auto", "steer", "followUp"] satisfies PromptMode[];
 
-/** The URI of a web (`http`/`https` with a host) or `mailto` link; `undefined` for anything else. */
-function externalLink(url: unknown): vscode.Uri | undefined {
+/** `url` when it is a web (`http`/`https` with a host) or `mailto` link; `undefined` for anything else. */
+function externalLink(url: unknown): string | undefined {
 	if (typeof url !== "string") return undefined;
 	let parsed: URL;
 	try {
@@ -58,12 +60,12 @@ function externalLink(url: unknown): vscode.Uri | undefined {
 		return undefined;
 	}
 	if (!EXTERNAL_SCHEMES.includes(parsed.protocol) || (parsed.protocol !== "mailto:" && !parsed.hostname)) return undefined;
-	return vscode.Uri.parse(url);
+	return url;
 }
 
 /** What the chat view needs from the extension host. */
 export interface ChatHost {
-	/** The running service; starts OMP first when startup is `manual`. Rejects when OMP is unavailable. */
+	/** The running service; starts OMP first when it is not running (manual startup, no folder, after a failure). Rejects when OMP is unavailable. */
 	ensureService(): Promise<OmpServiceApi>;
 	pendingInteractions(): PendingInteraction[];
 	respond(id: string, response: Extract<WebviewMessage, { type: "respond" }>["response"]): void;
@@ -216,8 +218,13 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 		};
 		webview.html = this.html(webview);
 		this.viewSubscriptions = [
-			webview.onDidReceiveMessage((message: WebviewMessage) => {
-				this.onMessage(message).catch(error => this.logger.error(`Chat message ${message.type} failed`, error));
+			webview.onDidReceiveMessage((message: unknown) => {
+				if (!isRecord(message)) {
+					this.logger.warn(`Ignoring a chat message that is not an object: ${String(message)}`);
+					return;
+				}
+				const typed = message as WebviewMessage;
+				this.onMessage(typed).catch(error => this.logger.error(`Chat message ${String(typed.type)} failed`, error));
 			}),
 			view.onDidDispose(() => {
 				if (this.view !== view) return;
@@ -338,9 +345,15 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 				this.renderEmitter.fire(this.lastRendered);
 				return;
 			}
-			case "send":
+			case "send": {
+				const { id, text, mode, attachments }: Record<string, unknown> = message;
+				if (typeof id !== "string" || typeof text !== "string" || !PROMPT_MODES.includes(mode) || !Array.isArray(attachments)) {
+					this.logger.warn(`Ignoring a prompt that is not one: id ${String(id)}, mode ${String(mode)}`);
+					return;
+				}
 				await this.submit(message);
 				return;
+			}
 			case "pickContext":
 				this.addFiles(await pickContextFiles(this.logger));
 				return;
@@ -356,19 +369,33 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 				await vscode.commands.executeCommand(command);
 				return;
 			}
-			case "setThinkingLevel":
-				await this.guard("Set thinking level", async service => service.setThinkingLevel(message.level));
-				return;
-			case "openFile":
-				await this.attempt("Open file", () => this.host.openFile(message.path, message.line));
-				return;
-			case "openDiff": {
-				const file: unknown = message.path;
-				if (file !== undefined && (typeof file !== "string" || !file)) {
-					this.logger.warn(`Ignoring a tool diff for a file that is not a path: ${String(file)}`);
+			case "setThinkingLevel": {
+				const level: unknown = message.level;
+				if (typeof level !== "string") {
+					this.logger.warn(`Ignoring a thinking level that is not text: ${String(level)}`);
 					return;
 				}
-				await this.attempt("Open diff", () => this.host.openToolDiff(message.toolCallId, file));
+				await this.guard("Set thinking level", async service => service.setThinkingLevel(message.level));
+				return;
+			}
+			case "openFile": {
+				const file: unknown = message.path;
+				const line: unknown = message.line;
+				if (typeof file !== "string" || !file || (line !== undefined && typeof line !== "number")) {
+					this.logger.warn(`Ignoring a file link that is not a path and line: ${String(file)}:${String(line)}`);
+					return;
+				}
+				await this.attempt("Open file", () => this.host.openFile(message.path, message.line));
+				return;
+			}
+			case "openDiff": {
+				const toolCallId: unknown = message.toolCallId;
+				const file: unknown = message.path;
+				if (typeof toolCallId !== "string" || (file !== undefined && (typeof file !== "string" || !file))) {
+					this.logger.warn(`Ignoring a tool diff that does not name a tool call and file: ${String(toolCallId)} ${String(file)}`);
+					return;
+				}
+				await this.attempt("Open diff", () => this.host.openToolDiff(toolCallId, file));
 				return;
 			}
 			case "openExternal": {
@@ -378,7 +405,7 @@ export class ChatView implements vscode.WebviewViewProvider, InteractionSurface,
 					return;
 				}
 				await this.attempt("Open link", async () => {
-					await vscode.env.openExternal(link);
+					await openExternalUrl(link);
 				});
 				return;
 			}

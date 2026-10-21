@@ -145,6 +145,14 @@ describe("ChangeTracker", () => {
 		assert.deepEqual(stub.callsTo("window.showWarningMessage"), []);
 	});
 
+	it("diffs a file the tool created against its empty oldText", async () => {
+		fs.writeFileSync(path.join(dir, "b.ts"), "now\n");
+		const item = toolItem("t9", {}, { path: path.join(dir, "b.ts"), oldText: "" });
+		assert.equal(await tracker.openToolDiff(item), true);
+		const [[, left]] = diffCalls();
+		assert.equal(tracker.contentProvider.provideTextDocumentContent(left as never), "");
+	});
+
 	it("asks before diffing a file outside the workspace and respects a refusal", async () => {
 		const outside = path.resolve("/elsewhere/c.ts");
 		const item = toolItem("t9", {}, { path: outside, oldText: "then\n" });
@@ -179,6 +187,43 @@ describe("ChangeTracker", () => {
 		await edit("t2", "secret.ts", "y\n");
 		assert.equal(await tracker.openToolDiff(toolItem("t1", { path: "a.ts" }), "secret.ts"), false);
 		assert.deepEqual(diffCalls(), []);
+	});
+
+	it("snapshots a file when the tool's start event arrives, while earlier events are still being processed", async () => {
+		const slowFile = path.join(dir, "slow.ts");
+		const file = path.join(dir, "a.ts");
+		const disk = new Map([[file, "before\n"]]);
+		let release!: () => void;
+		const slow = new Promise<void>(resolve => (release = resolve));
+		const reading = new ChangeTracker(memoryLogger(), async filePath => {
+			if (filePath === slowFile) await slow;
+			return disk.get(filePath) ?? null;
+		});
+		try {
+			reading.setService(fake.service);
+			fake.tools.fire({ phase: "start", toolCallId: "t0", name: "edit", args: { path: "slow.ts" } });
+			fake.tools.fire({ phase: "start", toolCallId: "t1", name: "write", args: { path: "a.ts" } });
+			disk.set(file, "after\n");
+			release();
+			fake.tools.fire({ phase: "end", toolCallId: "t1", name: "write", args: { path: "a.ts" }, result: { text: "", isError: false } });
+			await reading.whenIdle();
+			assert.deepEqual(reading.changes, [{ path: file, status: "M", added: 1, removed: 1 }]);
+		} finally {
+			reading.dispose();
+		}
+	});
+
+	it("drops tool events of the previous session that were still queued at a session switch", async () => {
+		fs.writeFileSync(path.join(dir, "a.ts"), "one\n");
+		fake.tools.fire({ phase: "start", toolCallId: "t1", name: "edit", args: { path: "a.ts" } });
+		await tracker.whenIdle();
+		fs.writeFileSync(path.join(dir, "a.ts"), "two\n");
+		const details = { path: path.join(dir, "a.ts"), oldText: "one\n" };
+		fake.tools.fire({ phase: "end", toolCallId: "t1", name: "edit", args: { path: "a.ts" }, result: { text: "", isError: false, details } });
+		fake.sessions.fire({ sessionId: "s2" } as SessionView);
+		await tracker.whenIdle();
+		assert.deepEqual(tracker.changes, []);
+		assert.equal(tracker.summary(), "");
 	});
 
 	it("clears on a session switch and closes its baseline diffs without asking VS Code to reload their deleted baselines", async () => {

@@ -1,7 +1,7 @@
 import * as assert from "node:assert/strict";
 import { InteractionsView } from "../../../src/webview/interactions";
-import type { WebviewMessage } from "../../../src/webview/protocol";
-import { click, event, focused, useDom } from "./webviewDom";
+import type { PendingInteraction, WebviewMessage } from "../../../src/webview/protocol";
+import { click, event, focused, liveIntervals, useDom } from "./webviewDom";
 
 describe("InteractionsView", () => {
 	useDom();
@@ -56,5 +56,44 @@ describe("InteractionsView", () => {
 		other.value = "teal";
 		other.dispatchEvent(event("keydown", { key: "Enter", isComposing: false }));
 		assert.deepEqual(posted, [{ type: "respond", id: "q1", response: { kind: "answers", answers: [{ id: "color", selectedOptions: [], customInput: "teal" }] } }]);
+	});
+
+	it("cancels a question it cannot show, so OMP does not wait for its timeout", () => {
+		const malformed = { request: { id: "q1", kind: "ask", questions: [{ id: "color", question: "Which color?" }] } } as unknown as PendingInteraction;
+		assert.throws(() => view.add(malformed));
+		assert.deepEqual(posted, [{ type: "respond", id: "q1", response: { kind: "cancelled" } }]);
+		assert.equal(view.size, 0);
+	});
+
+	it("cancels the question on Escape", () => {
+		view.add({ request: { id: "i1", kind: "input", title: "Name?" } });
+		view.element.querySelector("input")?.dispatchEvent(event("keydown", { key: "Escape", isComposing: false }));
+		assert.deepEqual(posted, [{ type: "respond", id: "i1", response: { kind: "cancelled" } }]);
+	});
+
+	it("keeps what the user entered when the same question is shown again", () => {
+		const ask: PendingInteraction = {
+			request: { id: "q1", kind: "ask", questions: [{ id: "color", question: "Which color?", multi: true, options: [{ label: "red" }, { label: "blue" }] }] },
+		};
+		view.add(ask);
+		const [, blue] = view.element.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+		blue.checked = true;
+		const typed = view.element.querySelector<HTMLInputElement>('input[type="text"]');
+		assert.ok(typed);
+		typed.value = "teal";
+		view.add(ask);
+		const shown = [...view.element.querySelectorAll<HTMLInputElement>("input")];
+		assert.deepEqual(
+			shown.map(input => (input.type === "text" ? input.value : input.checked === true)),
+			[false, true, "teal"],
+		);
+		assert.equal(view.element.querySelectorAll(".interaction").length, 1);
+	});
+
+	it("drops the countdown when the question is shown again without a timeout", () => {
+		view.add({ request: { id: "i1", kind: "input", title: "Name?" }, expiresAt: Date.now() + 30_000 });
+		view.add({ request: { id: "i1", kind: "input", title: "Name?" } });
+		assert.equal(view.element.querySelector(".countdown")?.textContent, "");
+		assert.equal(liveIntervals(), 0);
 	});
 });

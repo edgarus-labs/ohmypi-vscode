@@ -50,6 +50,13 @@ describe("toModelView", () => {
 		assert.equal(view.cost, undefined);
 	});
 
+	it("prices missing cache rates at zero and drops pricing without input and output rates", () => {
+		const partial = { input: 1, output: 2 } as unknown as ModelInfo["cost"];
+		assert.deepEqual(toModelView({ ...wire, cost: partial }).cost, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+		const unpriced = { input: "1", output: 2, cacheRead: 0, cacheWrite: 0 } as unknown as ModelInfo["cost"];
+		assert.equal(toModelView({ ...wire, cost: unpriced }).cost, undefined);
+	});
+
 	it("keeps the class, family and revision OMP identifies the model by, dropping non-string parts", () => {
 		const identity = { class: "anthropic", family: "opus", revision: "4.1.0" };
 		assert.deepEqual(toModelView({ ...wire, identity }).identity, identity);

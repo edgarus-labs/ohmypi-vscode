@@ -11,13 +11,14 @@ export function stateWord(input: { connection: ConnectionState; phase: SessionPh
 	return input.phase === "idle" ? "idle" : "working";
 }
 
-/** `todos 2/5 · current: <task in progress>`; undefined when there are no tasks. */
+/** `todos 2/5 · current: <task in progress>`, abandoned tasks left out of the count; undefined when there are no tasks. */
 export function todoSummary(phases: readonly TodoPhaseView[]): string | undefined {
 	const tasks = phases.flatMap(phase => phase.tasks);
 	if (tasks.length === 0) return undefined;
-	const done = tasks.filter(task => task.status === "completed").length;
+	const counted = tasks.filter(task => task.status !== "abandoned");
+	const done = counted.filter(task => task.status === "completed").length;
 	const current = tasks.find(task => task.status === "in_progress");
-	const summary = `todos ${done}/${tasks.length}`;
+	const summary = `todos ${done}/${counted.length}`;
 	return current ? `${summary} · current: ${current.content.replace(/\s+/g, " ").trim()}` : summary;
 }
 

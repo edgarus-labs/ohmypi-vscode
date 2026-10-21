@@ -134,6 +134,39 @@ describe("PromptTracker phases", () => {
 		assert.deepEqual(await outcome, { status: "error", error: "rate limited", sessionSettled: true });
 	});
 
+	for (const [name, end] of [
+		["rejected", (t: PromptTracker) => t.rejected("p1", "busy")],
+		["completed locally", (t: PromptTracker) => t.acknowledged("p1", false)],
+	] as const) {
+		it(`does not carry an abort of a prompt ${name} before admission into the next prompt`, () => {
+			const { t } = tracker();
+			t.submit("p1");
+			t.abortRequested();
+			assert.equal(t.phase, "aborting");
+			end(t);
+			assert.equal(t.phase, "idle");
+			t.submit("p2");
+			assert.equal(t.phase, "submitting");
+			t.acknowledged("p2", true);
+			t.agentStart();
+			assert.equal(t.phase, "running");
+		});
+	}
+
+	it("keeps an admitted prompt open across session_settled until its own prompt_result", async () => {
+		const { t } = tracker();
+		const outcome = settledState(t.submit("p1"));
+		t.acknowledged("p1", true);
+		t.sessionSettled();
+		await tick();
+		assert.equal(outcome.value, undefined);
+		assert.equal(t.phase, "running");
+		t.promptResult(result("p1"));
+		await tick();
+		assert.deepEqual(outcome.value, { status: "completed", sessionSettled: true } satisfies PromptOutcome);
+		assert.equal(t.phase, "idle");
+	});
+
 	it("only completes the prompt matching the prompt_result id", async () => {
 		const { t } = tracker();
 		const first = settledState(t.submit("p1"));

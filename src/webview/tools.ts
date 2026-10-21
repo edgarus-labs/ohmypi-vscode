@@ -71,11 +71,11 @@ export function summarizeTool(name: string, args: unknown): string {
 	return typeof firstString === "string" ? oneLine(firstString) : "";
 }
 
+/** `mcp__server__tool` → server and tool; a name joined with single underscores stays whole, as its server name may contain them. */
 export function splitMcpName(name: string): { server: string; tool: string } {
 	const rest = name.startsWith("mcp__") ? name.slice(5) : name;
-	const separator = rest.includes("__") ? "__" : "_";
-	const index = rest.indexOf(separator);
-	return index < 0 ? { server: rest, tool: "" } : { server: rest.slice(0, index), tool: rest.slice(index + separator.length) };
+	const index = rest.indexOf("__");
+	return index < 0 ? { server: rest, tool: "" } : { server: rest.slice(0, index), tool: rest.slice(index + 2) };
 }
 
 const HIT_COUNT_KEYS = ["matchCount", "totalMatches", "count", "fileCount"];
@@ -203,13 +203,17 @@ function errorLine(result: ToolResultView | undefined): string | undefined {
 	return line.length > MAX_ERROR_LINE ? `${line.slice(0, MAX_ERROR_LINE - 1)}…` : line;
 }
 
-/** Rewrites paths under `cwd` (POSIX or Windows separators) as relative paths. */
+/**
+ * Rewrites paths under `cwd` as relative paths. A Windows `cwd` (drive letter or backslashes) matches either
+ * separator and any letter case; a POSIX one matches exactly.
+ */
 function relativeTo(text: string, cwd: string | undefined): string {
 	if (!cwd) return text;
-	const separator = cwd.includes("\\") && !cwd.includes("/") ? "\\" : "/";
-	const root = cwd.endsWith(separator) ? cwd : cwd + separator;
-	const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return text.replace(new RegExp(`(^|[\\s"'(])${escaped}`, "g"), "$1");
+	const windows = /^[a-z]:|\\/i.test(cwd);
+	const separator = windows ? String.raw`[\\/]` : "/";
+	const parts = cwd.replace(/[\\/]+$/, "").split(windows ? /[\\/]/ : "/");
+	const root = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(separator) + separator;
+	return text.replace(new RegExp(`(^|[\\s"'(])${root}`, windows ? "gi" : "g"), "$1");
 }
 
 /** Label of a file link: the path relative to `cwd` when inside it, plus `:line`. */
@@ -230,8 +234,8 @@ function headerFile(item: ToolItem, kind: RendererKind, primary: string, cwd: st
 /** Everything a tool row's header shows; pure and never throws. */
 export function toolHeadline(item: ToolItem, cwd?: string): ToolHeadline {
 	let state = statusState(item);
-	const kind = pickRenderer(item.name);
 	try {
+		const kind = pickRenderer(item.name);
 		state = toolState(item);
 		const { server, tool } = splitMcpName(item.name);
 		const name = kind === "mcp" ? (tool ? `${server} › ${tool}` : server) : item.name;
@@ -244,7 +248,7 @@ export function toolHeadline(item: ToolItem, cwd?: string): ToolHeadline {
 		if (exit !== undefined) parts.push(`exit ${exit}`);
 		if (item.name === "write" && isRecord(item.args) && typeof item.args.content === "string") parts.push(plural(item.args.content.split("\n").length, "line"));
 		if (state === "background") parts.splice(0, parts.length, "in background");
-		else if (item.endedAt !== undefined) parts.push(formatDuration(item.endedAt - item.startedAt));
+		else if (item.endedAt !== undefined && item.startedAt > 0 && item.endedAt >= item.startedAt) parts.push(formatDuration(item.endedAt - item.startedAt));
 		const primary = relativeTo(primaryArg(item, kind), cwd);
 		const headline: ToolHeadline = { name, primary, glyph: GLYPH[state], state, detail: parts.join(" · ") };
 		const file = headerFile(item, kind, primary, cwd);
@@ -258,25 +262,34 @@ export function toolHeadline(item: ToolItem, cwd?: string): ToolHeadline {
 
 // ── Files ────────────────────────────────────────────────────────────────────
 
-/** Trailing `read` selector parts: `:12`, `:12-40`, `:50+150`, `:5-16,960-973`, `:-60` (tail) and `:raw`. */
-const SELECTOR_SUFFIX = /:(raw|-\d+|\d+(?:[-+]\d*)?(?:,\d+(?:[-+]\d*)?)*)$/;
+/**
+ * Trailing `read` selector parts: `:12`, `:12-40`, `:50+150`, `:5-16,960-973`, `:-60` (tail), the modes `:raw`,
+ * `:conflicts` and `:img`, and video times (`:1h5m42s`, `:90s`).
+ */
+const SELECTOR_SUFFIX = /:(raw|conflicts|img|\d+h(?:\d+m)?(?:\d+s)?|\d+m(?:\d+s)?|\d+s|-\d+|\d+(?:[-+]\d*)?(?:,\d+(?:[-+]\d*)?)*)$/;
 
 /** A path with `read` selectors → the path and the first line the selectors start at. */
 export function splitSelector(raw: string): { path: string; line?: number } {
 	let path = raw;
 	let line: number | undefined;
 	for (let match = SELECTOR_SUFFIX.exec(path); match && match.index > 0; match = SELECTOR_SUFFIX.exec(path)) {
-		const first = /^\d+/.exec(match[1]);
+		const first = /^\d+(?=$|[-+,])/.exec(match[1]);
 		if (first) line = Number(first[0]);
 		path = path.slice(0, match.index);
 	}
 	return line === undefined ? { path } : { path, line };
 }
 
+/** The call's diff; a multi-file edit's per-file diffs each under a `--- path` / `+++ path` header. */
 function collectDiff(details: unknown): string | undefined {
 	if (!isRecord(details)) return undefined;
 	if (Array.isArray(details.perFileResults)) {
-		const diffs = details.perFileResults.flatMap(entry => (isRecord(entry) && str(entry.diff) ? [`--- ${str(entry.path) ?? ""}`, str(entry.diff) as string] : []));
+		const diffs = details.perFileResults.flatMap(entry => {
+			if (!isRecord(entry)) return [];
+			const diff = str(entry.diff);
+			const path = str(entry.path) ?? "";
+			return diff === undefined ? [] : [`--- ${path}`, `+++ ${path}`, diff];
+		});
 		if (diffs.length > 0) return diffs.join("\n");
 	}
 	return str(details.diff);
@@ -337,12 +350,12 @@ export type FileAction = { kind: "open"; path: string; line: number | undefined 
 
 /**
  * A link per file the call names (except the header's file) and a Diff where the host can show a real one: the
- * call changed files, has finished, and the file either lies in the working directory, where the host tracks
- * changes, or has its old text recorded by the call.
+ * call changed files (it recorded a diff, or it is a writing tool that did not fail), has finished, and the file
+ * either lies in the working directory, where the host tracks changes, or has its old text recorded by the call.
  */
 export function fileActions(item: ToolItem, cwd: string | undefined): FileAction[] {
 	const inHeader = toolHeadline(item, cwd).file;
-	const changesFiles = collectDiff(item.result?.details) !== undefined || CHANGES_FILES[item.name] === true;
+	const changesFiles = collectDiff(item.result?.details) !== undefined || (CHANGES_FILES[item.name] === true && statusState(item) !== "error");
 	const files = toolFiles(item, cwd);
 	const root = cwd === undefined ? undefined : `${pathKey(cwd, undefined).replace(/\/+$/, "")}/`;
 	const actions: FileAction[] = [];

@@ -319,14 +319,31 @@ describe("ChatView", () => {
 			assert.match(logger.text("warn"), /diff/);
 		});
 
-		it("opens web and mail links in the browser", async () => {
+		it("ignores file and diff requests that do not name a file or tool call", async () => {
 			const webview = await ready();
-			webview.receive({ type: "openExternal", url: "https://example.com/a?b=1" });
+			for (const message of [
+				{ type: "openFile", path: 5 },
+				{ type: "openFile", path: "" },
+				{ type: "openFile", path: "src/a.ts", line: "3" },
+				{ type: "openDiff", toolCallId: 7 },
+			]) {
+				webview.receive(message as unknown as WebviewMessage);
+			}
+			await settle();
+			assert.deepEqual(host.opened, []);
+			assert.deepEqual(host.diffs, []);
+			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("Ignoring")).length, 4, logger.text("warn"));
+		});
+
+		it("opens web and mail links in the browser exactly as written", async () => {
+			const webview = await ready();
+			const oauth = "https://auth.example.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fcb&state=a%2Bb%26c";
+			webview.receive({ type: "openExternal", url: oauth });
 			webview.receive({ type: "openExternal", url: "mailto:me@example.com" });
 			await settle();
 			assert.deepEqual(
-				stub.callsTo("env.openExternal").map(([uri]) => String(uri)),
-				["https://example.com/a?b=1", "mailto:me@example.com"],
+				stub.callsTo("env.openExternal").map(([target]) => target),
+				[oauth, "mailto:me@example.com"],
 			);
 		});
 
@@ -366,6 +383,57 @@ describe("ChatView", () => {
 			await settle();
 			assert.deepEqual(webview.ofType("notice"), []);
 			assert.deepEqual(stub.callsTo("window.showErrorMessage"), [["OMP: Abort failed: not running"]]);
+		});
+	});
+
+	describe("malformed messages", () => {
+		it("ignores a message that is not an object", async () => {
+			const rejections: unknown[] = [];
+			const onRejection = (reason: unknown) => rejections.push(reason);
+			process.on("unhandledRejection", onRejection);
+			try {
+				const webview = await ready();
+				webview.receive(null as unknown as WebviewMessage);
+				webview.receive("send" as unknown as WebviewMessage);
+				await settle();
+			} finally {
+				process.off("unhandledRejection", onRejection);
+			}
+			assert.deepEqual(rejections, []);
+			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("not an object")).length, 2, logger.text("warn"));
+		});
+
+		it("ignores a thinking level that is not text", async () => {
+			const levels: unknown[] = [];
+			Object.assign(service.api, { setThinkingLevel: async (level: unknown) => void levels.push(level) });
+			const webview = await ready();
+			webview.receive({ type: "setThinkingLevel", level: 3 } as unknown as WebviewMessage);
+			webview.receive({ type: "setThinkingLevel", level: "high" } as WebviewMessage);
+			await settle();
+			assert.deepEqual(levels, ["high"]);
+			assert.match(logger.text("warn"), /Ignoring a thinking level/);
+		});
+
+		it("ignores a prompt without an id, text or attachment list", async () => {
+			const prompts: string[] = [];
+			service.prompt = async text => {
+				prompts.push(text);
+				return { status: "completed", sessionSettled: true };
+			};
+			const webview = await ready();
+			const valid = { type: "send", id: "s1", text: "hello", mode: "auto", includeContext: false, attachments: [] };
+			for (const message of [
+				{ ...valid, id: 1 },
+				{ ...valid, text: { toString: () => "hello" } },
+				{ ...valid, attachments: "a.ts" },
+				{ ...valid, mode: "now" },
+			]) {
+				webview.receive(message as unknown as WebviewMessage);
+			}
+			await settle();
+			assert.deepEqual(prompts, []);
+			assert.deepEqual(webview.ofType("sendResult"), []);
+			assert.equal(logger.text("warn").split("\n").filter(line => line.includes("Ignoring a prompt")).length, 4, logger.text("warn"));
 		});
 	});
 

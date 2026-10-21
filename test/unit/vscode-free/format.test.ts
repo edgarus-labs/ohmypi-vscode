@@ -38,6 +38,13 @@ describe("format helpers", () => {
 		}
 	});
 
+	it("keeps every agent summary field on one table row", () => {
+		const md = agentSummaryMarkdown({ id: "a1", name: "scout", status: "failed", error: "one\rtwo\r\nthree\nfour|five" }, 0);
+		assert.ok(md.includes("| error | one two three four\\|five |"), JSON.stringify(md));
+		assert.ok(!md.includes("\r"), JSON.stringify(md));
+		assert.ok(agentSummaryMarkdown({ id: "a1", name: "scout\r\nx", status: "failed" }, 0).startsWith("# scout x\n\n| field"));
+	});
+
 	it("renders a transcript as markdown", () => {
 		const items: TranscriptItem[] = [
 			{ kind: "user", id: "u", text: "hello" },
