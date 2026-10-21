@@ -5,6 +5,14 @@
   "version": "0.6.0",
   "publisher": "oh-my-pi",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/edgarus-labs/ohmypi-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/edgarus-labs/ohmypi-vscode/issues"
+  },
+  "homepage": "https://github.com/edgarus-labs/ohmypi-vscode#readme",
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.95.0",
@@ -432,7 +440,7 @@
     "test": "npm run typecheck && npm run test:unit && npm run test:integration",
     "test:real": "node esbuild.mjs && node esbuild.mjs --tests && node out/test/runIntegration.js --real",
     "vscode:prepublish": "node esbuild.mjs --production",
-    "package": "node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies --allow-missing-repository -o dist-vsix/oh-my-pi.vsix"
+    "package": "node -e \"require('fs').mkdirSync('dist-vsix',{recursive:true})\" && vsce package --no-dependencies -o dist-vsix/oh-my-pi.vsix"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
