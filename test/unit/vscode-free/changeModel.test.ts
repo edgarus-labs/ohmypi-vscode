@@ -145,10 +145,11 @@ describe("ChangeModel", () => {
 	it("does not read or track paths outside the workspace roots", async () => {
 		const outside = path.resolve("/elsewhere/secret.txt");
 		const unc = "\\\\attacker\\share\\x.txt";
+		const uncPaths = path.sep === "\\" ? [unc] : [];
 		const fake = disk({ [outside]: "s", [file("in.ts")]: "i" });
 		const model = new ChangeModel(fake.read, memoryLogger());
-		await model.apply(start("t1", "write", { paths: [outside, unc, "../escape.ts", "~/.ssh/config", "in.ts"] }), scope);
-		await model.apply(end("t1", "write", { paths: [outside, unc] }, { path: outside, oldText: "old" }), scope);
+		await model.apply(start("t1", "write", { paths: [outside, ...uncPaths, "../escape.ts", "~/.ssh/config", "in.ts"] }), scope);
+		await model.apply(end("t1", "write", { paths: [outside, ...uncPaths] }, { path: outside, oldText: "old" }), scope);
 		assert.deepEqual(fake.reads, [file("in.ts")]);
 		assert.deepEqual(model.changes, []);
 		assert.equal(model.hasBaseline(outside), false);

@@ -577,7 +577,6 @@ describe("OmpService against fake-omp", function () {
 	it("stop during an in-flight start rejects the start as superseded and stays stopped", async () => {
 		const { service, states } = create();
 		const startError = settle(service.start());
-		await tick(30);
 		await service.stop();
 		assert.equal(codeOf(await startError), "superseded");
 		assert.equal(service.connection.state, "stopped");
