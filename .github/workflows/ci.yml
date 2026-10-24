@@ -40,3 +40,14 @@ jobs:
         run: xvfb-run -a npm run test:integration
       - name: Package the extension
         run: npm run package
+      - name: Verify the VSIX version and file name
+        run: node scripts/vsix.mjs verify
+      - name: Name the VSIX
+        id: vsix
+        run: echo "name=$(node scripts/vsix.mjs name)" >> "$GITHUB_OUTPUT"
+      - name: Upload the VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vsix.outputs.name }}
+          path: dist-vsix/${{ steps.vsix.outputs.name }}
+          if-no-files-found: error
