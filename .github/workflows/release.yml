@@ -30,9 +30,21 @@ jobs:
         run: npm run test:unit
       - name: Package the extension (.vsix)
         run: npm run package
+      - name: Verify the VSIX version and file name against the tag
+        run: node scripts/vsix.mjs verify "$GITHUB_REF_NAME"
+      - name: Name the VSIX
+        id: vsix
+        run: echo "name=$(node scripts/vsix.mjs name)" >> "$GITHUB_OUTPUT"
+      - name: Upload the VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vsix.outputs.name }}
+          path: dist-vsix/${{ steps.vsix.outputs.name }}
+          if-no-files-found: error
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-vsix/*.vsix
+          files: dist-vsix/${{ steps.vsix.outputs.name }}
+          fail_on_unmatched_files: true
           draft: true
           generate_release_notes: true
